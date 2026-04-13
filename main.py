@@ -10,7 +10,7 @@ from telegram.ext import (
 
 import os
 
-# التوكن من Railway
+# 🔑 التوكن من Railway
 TOKEN = os.getenv("TOKEN")
 
 OWNER_ID = 8406441503
@@ -47,9 +47,11 @@ def back_menu(target="main"):
 # ===================== START =====================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # 🚫 منع التشغيل في القروب
+    # 🚫 منع التشغيل داخل القروب
     if update.effective_chat.type != "private":
-        await update.message.reply_text("❌ استخدم /start في خاص البوت.")
+        await update.message.reply_text(
+            "⚠️ استخدم البوت في الخاص فقط\n\n@ArcZone_SaudiBot"
+        )
         return
 
     user = update.effective_user
