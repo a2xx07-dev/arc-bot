@@ -62,7 +62,6 @@ DEFAULT_GROUP = {
     "vip_mode": True,
 }
 
-
 owner_states: dict[int, dict[str, Any]] = {}
 
 
@@ -189,6 +188,7 @@ def main_menu(user_id: int) -> InlineKeyboardMarkup:
          InlineKeyboardButton("📊 الإعدادات", callback_data="show_settings")],
         [InlineKeyboardButton("🛠️ أوامر المشرفين", callback_data="admins_menu"),
          InlineKeyboardButton("💾 النسخ الاحتياطي", callback_data="backup_menu")],
+        [InlineKeyboardButton("📜 الأوامر", callback_data="commands_menu")],
     ])
 
 
@@ -725,12 +725,26 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("🛠️ قسم أوامر المشرفين", reply_markup=admins_menu())
     elif data == "show_admin_commands":
         await query.edit_message_text(
-            "/warn\n/warns\n/clearwarns\n/mute\n/unmute\n/ban\n/unban user_id\n/setnote نص\n/clean",
+            "🛠️ أوامر المشرفين:\n\n"
+            "/warn - تحذير عضو بالرد\n"
+            "/warns - عرض التحذيرات\n"
+            "/clearwarns - تصفير التحذيرات\n"
+            "/mute - كتم عضو بالرد\n"
+            "/unmute - فك الكتم بالرد\n"
+            "/ban - حظر عضو بالرد\n"
+            "/unban user_id - فك الحظر\n"
+            "/setnote نص - تغيير الملاحظة المثبتة\n"
+            "/clean - حذف الرسالة بالرد",
             reply_markup=back("admins_menu"),
         )
     elif data == "show_group_commands":
         await query.edit_message_text(
-            "/bindgroup\n/id\n/rules\n/welcome\n/settings",
+            "📘 أوامر القروب:\n\n"
+            "/bindgroup - ربط القروب\n"
+            "/id - عرض الآيدي\n"
+            "/rules - عرض القوانين\n"
+            "/welcome - عرض رسالة الترحيب\n"
+            "/settings - عرض إعدادات القروب",
             reply_markup=back("admins_menu"),
         )
 
@@ -742,6 +756,28 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "restore_backup":
         ok = restore_backup()
         await query.edit_message_text("✅ تم استرجاع النسخة." if ok else "❌ لا توجد نسخة احتياطية.", reply_markup=backup_menu())
+
+    elif data == "commands_menu":
+        await query.edit_message_text(
+            "📜 أوامر البوت:\n\n"
+            "👤 أوامر عامة:\n"
+            "/id - عرض الآيدي\n"
+            "/rules - عرض القوانين\n"
+            "/welcome - عرض رسالة الترحيب\n"
+            "/settings - عرض إعدادات القروب\n\n"
+            "🛡️ أوامر المشرفين:\n"
+            "/warn - تحذير عضو بالرد\n"
+            "/warns - عرض تحذيرات عضو\n"
+            "/clearwarns - تصفير التحذيرات\n"
+            "/mute - كتم عضو بالرد\n"
+            "/unmute - فك الكتم بالرد\n"
+            "/ban - حظر عضو بالرد\n"
+            "/unban user_id - فك الحظر\n"
+            "/setnote نص - تغيير الملاحظة المثبتة\n"
+            "/clean - حذف الرسالة بالرد\n"
+            "/bindgroup - ربط القروب\n",
+            reply_markup=back("main"),
+        )
 
 
 async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
