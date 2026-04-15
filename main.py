@@ -536,7 +536,14 @@ async def cmd_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not cfg:
         await update.message.reply_text("هذا القروب غير مربوط. استخدم /bindgroup")
         return
+
     await update.message.reply_text(cfg["rules_text"])
+
+    if cfg["welcome_photo"]:
+        try:
+            await update.message.reply_photo(cfg["welcome_photo"])
+        except Exception:
+            pass
 
 
 async def cmd_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -544,14 +551,20 @@ async def cmd_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not cfg:
         await update.message.reply_text("هذا القروب غير مربوط. استخدم /bindgroup")
         return
-    text = format_welcome(cfg, update.effective_user.first_name, update.effective_chat.title or "القروب", update.effective_user.id)
+
+    text = format_welcome(
+        cfg,
+        update.effective_user.first_name,
+        update.effective_chat.title or "القروب",
+        update.effective_user.id,
+    )
+    await update.message.reply_text(text)
+
     if cfg["welcome_photo"]:
         try:
-            await update.message.reply_photo(cfg["welcome_photo"], caption=text)
-            return
+            await update.message.reply_photo(cfg["welcome_photo"])
         except Exception:
             pass
-    await update.message.reply_text(text)
 
 
 async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1039,13 +1052,14 @@ async def handle_new_members(update: Update, context: ContextTypes.DEFAULT_TYPE)
     group_name = update.effective_chat.title or "القروب"
     for member in update.message.new_chat_members:
         text = format_welcome(cfg, member.first_name or "يا هلا", group_name, member.id)
+
+        await update.message.reply_text(text)
+
         if cfg["welcome_photo"]:
             try:
-                await update.message.reply_photo(cfg["welcome_photo"], caption=text)
+                await update.message.reply_photo(cfg["welcome_photo"])
             except Exception:
-                await update.message.reply_text(text)
-        else:
-            await update.message.reply_text(text)
+                pass
 
     if cfg["auto_pin_note"] and cfg["note_text"]:
         await pin_note_now(context, update.effective_chat.id, cfg["note_text"])
