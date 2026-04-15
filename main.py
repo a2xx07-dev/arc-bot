@@ -558,7 +558,11 @@ async def cmd_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
         update.effective_chat.title or "القروب",
         update.effective_user.id,
     )
-    await update.message.reply_text(text)
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📜 عرض القوانين", callback_data="show_rules_btn")]
+    ])
+
+    await update.message.reply_text(text, reply_markup=keyboard)
 
     if cfg["welcome_photo"]:
         try:
@@ -866,6 +870,14 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("🎉 قسم الترحيب", reply_markup=welcome_menu())
     elif data == "rules_menu":
         await query.edit_message_text("📜 قسم القوانين", reply_markup=rules_menu())
+    elif data == "show_rules_btn":
+        await query.message.reply_text(cfg["rules_text"])
+
+        if cfg["welcome_photo"]:
+            try:
+                await query.message.reply_photo(cfg["welcome_photo"])
+            except Exception:
+                pass
     elif data == "show_rules":
         await query.edit_message_text(cfg["rules_text"], reply_markup=back("rules_menu"))
     elif data == "replies_menu":
@@ -1050,10 +1062,14 @@ async def handle_new_members(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     group_name = update.effective_chat.title or "القروب"
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📜 عرض القوانين", callback_data="show_rules_btn")]
+    ])
+
     for member in update.message.new_chat_members:
         text = format_welcome(cfg, member.first_name or "يا هلا", group_name, member.id)
 
-        await update.message.reply_text(text)
+        await update.message.reply_text(text, reply_markup=keyboard)
 
         if cfg["welcome_photo"]:
             try:
