@@ -18,6 +18,7 @@ from telegram.constants import ChatType
 from telegram.ext import (
     ApplicationBuilder,
     CallbackQueryHandler,
+    ChatMemberHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
@@ -1054,6 +1055,76 @@ async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✅ تم الحفظ.", reply_markup=main_menu(user.id))
 
 
+
+def _welcome_cache(context: ContextTypes.DEFAULT_TYPE) -> dict[str, str]:
+    return context.application.bot_data.setdefault("recent_welcomes", {})
+
+
+def _already_welcomed(context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int, ttl_seconds: int = 30) -> bool:
+    cache = _welcome_cache(context)
+    key = f"{chat_id}:{user_id}"
+    now = datetime.now(timezone.utc)
+    old_keys = []
+    for k, v in cache.items():
+        try:
+            ts = datetime.fromisoformat(v)
+            if (now - ts).total_seconds() > ttl_seconds:
+                old_keys.append(k)
+        except Exception:
+            old_keys.append(k)
+    for k in old_keys:
+        cache.pop(k, None)
+
+    if key in cache:
+        return True
+
+    cache[key] = now.isoformat()
+    return False
+
+
+async def send_welcome_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int, group_name: str, member, cfg: dict[str, Any]) -> None:
+    if _already_welcomed(context, chat_id, member.id):
+        return
+
+    text = format_welcome(cfg, member.first_name or "يا هلا", group_name, member.id)
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📜 عرض القوانين", callback_data="show_rules_btn")]
+    ])
+
+    await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
+
+    if cfg["welcome_photo"]:
+        try:
+            await context.bot.send_photo(chat_id=chat_id, photo=cfg["welcome_photo"])
+        except Exception:
+            pass
+
+
+async def handle_chat_member_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.chat_member:
+        return
+
+    chat = update.chat_member.chat
+    cfg = get_group(chat.id)
+    if not cfg or not cfg["welcome_enabled"]:
+        return
+
+    old_status = getattr(update.chat_member.old_chat_member, "status", None)
+    new_status = getattr(update.chat_member.new_chat_member, "status", None)
+
+    joined_statuses = {"member", "administrator", "creator"}
+    left_statuses = {"left", "kicked", "restricted"}
+
+    if old_status not in joined_statuses and new_status in joined_statuses:
+        await send_welcome_message(
+            context=context,
+            chat_id=chat.id,
+            group_name=chat.title or "القروب",
+            member=update.chat_member.new_chat_member.user,
+            cfg=cfg,
+        )
+
+
 async def handle_new_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.new_chat_members:
         return
@@ -1062,20 +1133,15 @@ async def handle_new_members(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     group_name = update.effective_chat.title or "القروب"
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📜 عرض القوانين", callback_data="show_rules_btn")]
-    ])
 
     for member in update.message.new_chat_members:
-        text = format_welcome(cfg, member.first_name or "يا هلا", group_name, member.id)
-
-        await update.message.reply_text(text, reply_markup=keyboard)
-
-        if cfg["welcome_photo"]:
-            try:
-                await update.message.reply_photo(cfg["welcome_photo"])
-            except Exception:
-                pass
+        await send_welcome_message(
+            context=context,
+            chat_id=update.effective_chat.id,
+            group_name=group_name,
+            member=member,
+            cfg=cfg,
+        )
 
     if cfg["auto_pin_note"] and cfg["note_text"]:
         await pin_note_now(context, update.effective_chat.id, cfg["note_text"])
@@ -1153,6 +1219,7 @@ def main():
     app.add_handler(CallbackQueryHandler(on_button))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, handle_private))
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, handle_new_members))
+    app.add_handler(ChatMemberHandler(handle_chat_member_update, ChatMemberHandler.CHAT_MEMBER))
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, handle_group_text))
 
     print("Bot is running...")
