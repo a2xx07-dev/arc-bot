@@ -47,8 +47,7 @@ DEFAULT_GROUP = {
         "• ثبات الأيم\n"
         "• مخططات القطع\n"
         "• تشغيل وتعريف القطع\n\n"
-        "📜 قبل تبدأ اقرأ القوانين: /rules\n"
-        "🆔 آيديك: {user_id}\n\n"
+        "📜 قبل تبدأ اقرأ القوانين من الزر تحت\n\n"
         "👑 شد حيلك وخل بصمتك تبان"
     ),
     "welcome_photo": "",
@@ -568,13 +567,21 @@ async def cmd_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📜 عرض القوانين", callback_data="show_rules_btn")]
     ])
 
-    await update.message.reply_text(text, reply_markup=keyboard)
-
     if cfg["welcome_photo"]:
         try:
-            await update.message.reply_photo(cfg["welcome_photo"])
-        except Exception:
-            pass
+            if len(text) > 1024:
+                text = text[:1000] + "..."
+            await update.message.reply_photo(
+                photo=cfg["welcome_photo"],
+                caption=text,
+                reply_markup=keyboard,
+                show_caption_above_media=True,
+            )
+            return
+        except Exception as e:
+            print(f"/welcome photo error: {e}")
+
+    await update.message.reply_text(text, reply_markup=keyboard)
 
 
 async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1087,13 +1094,22 @@ async def send_welcome_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int,
         [InlineKeyboardButton("📜 عرض القوانين", callback_data="show_rules_btn")]
     ])
 
-    await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
-
     if cfg["welcome_photo"]:
         try:
-            await context.bot.send_photo(chat_id=chat_id, photo=cfg["welcome_photo"])
-        except Exception:
-            pass
+            if len(text) > 1024:
+                text = text[:1000] + "..."
+            await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=cfg["welcome_photo"],
+                caption=text,
+                reply_markup=keyboard,
+                show_caption_above_media=True,
+            )
+            return
+        except Exception as e:
+            print(f"Welcome photo error: {e}")
+
+    await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
 
 
 async def handle_my_chat_member_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
