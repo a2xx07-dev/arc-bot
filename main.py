@@ -51,6 +51,8 @@ DEFAULT_GROUP = {
         "👑 شد حيلك وخل بصمتك تبان"
     ),
     "welcome_photo": "",
+    "media_below_text": True,
+    "welcome_buttons": [],
     "rules_text": (
         "📜 قوانين القروب:\n"
         "1) احترام الجميع\n"
@@ -127,6 +129,10 @@ def load_data() -> dict[str, Any]:
                 merged["auto_replies"] = {}
             if not isinstance(merged.get("warnings"), dict):
                 merged["warnings"] = {}
+            if not isinstance(merged.get("welcome_buttons"), list):
+                merged["welcome_buttons"] = []
+            if "media_below_text" not in merged:
+                merged["media_below_text"] = True
             data["groups"][gid] = merged
         return data
     except Exception:
@@ -267,6 +273,20 @@ def format_welcome(cfg: dict[str, Any], name: str, group_title: str, user_id: in
     )
 
 
+def build_welcome_keyboard(cfg: dict[str, Any]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = [
+        [InlineKeyboardButton("📜 عرض القوانين", callback_data="show_rules_btn")]
+    ]
+    for item in cfg.get("welcome_buttons", []):
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text", "")).strip()
+        url = str(item.get("url", "")).strip()
+        if text and url:
+            rows.append([InlineKeyboardButton(text, url=url)])
+    return InlineKeyboardMarkup(rows)
+
+
 def back(target: str = "settings_menu") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
@@ -352,6 +372,10 @@ def welcome_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("تغيير رسالة الترحيب", callback_data="set_welcome")],
         [InlineKeyboardButton("عرض رسالة الترحيب", callback_data="show_welcome")],
         [InlineKeyboardButton("تعيين صورة الترحيب", callback_data="set_welcome_photo")],
+        [InlineKeyboardButton("🖼️ تبديل مكان الوسائط", callback_data="toggle_media_position")],
+        [InlineKeyboardButton("🔗 تعيين زر رابط", callback_data="set_buttons")],
+        [InlineKeyboardButton("🗑️ حذف أزرار الروابط", callback_data="clear_welcome_buttons")],
+        [InlineKeyboardButton("👁️ معاينة الترحيب", callback_data="preview_welcome")],
         [InlineKeyboardButton("حذف صورة الترحيب", callback_data="clear_welcome_photo")],
         [InlineKeyboardButton("⬅️ العودة", callback_data="settings_menu")],
     ])
@@ -563,9 +587,7 @@ async def cmd_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
         update.effective_chat.title or "القروب",
         update.effective_user.id,
     )
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📜 عرض القوانين", callback_data="show_rules_btn")]
-    ])
+    keyboard = build_welcome_keyboard(cfg)
 
     if cfg["welcome_photo"]:
         try:
@@ -575,7 +597,7 @@ async def cmd_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 photo=cfg["welcome_photo"],
                 caption=text,
                 reply_markup=keyboard,
-                show_caption_above_media=True,
+                show_caption_above_media=cfg.get("media_below_text", True),
             )
             return
         except Exception as e:
@@ -814,6 +836,41 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     cfg = DATA["groups"][gid]
 
+    if data == "toggle_media_position":
+        cfg["media_below_text"] = not cfg.get("media_below_text", True)
+        save_data()
+        mode = "النص فوق الصورة ✅" if cfg["media_below_text"] else "النص تحت الصورة ✅"
+        await query.edit_message_text(f"✅ تم تحديث طريقة عرض الترحيب\n{mode}", reply_markup=welcome_menu())
+        return
+
+    if data == "clear_welcome_buttons":
+        cfg["welcome_buttons"] = []
+        save_data()
+        await query.edit_message_text("✅ تم حذف أزرار الروابط.", reply_markup=welcome_menu())
+        return
+
+    if data == "preview_welcome":
+        preview_name = user.first_name or "أحمد"
+        preview_text = format_welcome(cfg, preview_name, cfg.get("title") or "ARC ZONE", user.id)
+        keyboard = build_welcome_keyboard(cfg)
+
+        if cfg.get("welcome_photo"):
+            try:
+                await context.bot.send_photo(
+                    chat_id=query.message.chat_id,
+                    photo=cfg["welcome_photo"],
+                    caption=preview_text[:1024],
+                    reply_markup=keyboard,
+                    show_caption_above_media=cfg.get("media_below_text", True),
+                )
+            except Exception as e:
+                await context.bot.send_message(query.message.chat_id, f"تعذر إرسال المعاينة بالصورة: {e}")
+        else:
+            await context.bot.send_message(query.message.chat_id, preview_text, reply_markup=keyboard)
+
+        await query.edit_message_text("✅ تم إرسال المعاينة.", reply_markup=welcome_menu())
+        return
+
     toggle_map = {
         "toggle_anti_spam": "anti_spam",
         "toggle_anti_flood": "anti_flood",
@@ -859,6 +916,7 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "set_ban_after": ("set_ban_after", "أرسل رقم الطرد بعد كم إنذار."),
         "set_note": ("set_note", "أرسل النص المثبت الجديد."),
         "set_welcome_photo": ("set_welcome_photo", "أرسل رابط الصورة أو file_id أو أرسل صورة في الخاص."),
+        "set_buttons": ("set_buttons", "أرسل الزر بهذا الشكل:\nاسم الزر | الرابط\nوتقدر ترسل أكثر من زر، كل زر في سطر."),
         "set_group_link": ("set_group_link", "أرسل رابط المجموعة."),
         "set_log_channel": ("set_log_channel", "أرسل يوزر قناة السجل أو ID."),
         "set_discussion_group": ("set_discussion_group", "أرسل رابط أو آيدي مجموعة المناقشة."),
@@ -869,7 +927,12 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "show_welcome":
-        await query.edit_message_text(cfg["welcome_text"], reply_markup=back("welcome_menu"))
+        mode_text = "النص فوق الصورة ✅" if cfg.get("media_below_text", True) else "النص تحت الصورة ✅"
+        buttons_count = len(cfg.get("welcome_buttons", []))
+        await query.edit_message_text(
+            f"{cfg['welcome_text']}\n\n🖼️ وضع الوسائط: {mode_text}\n🔗 عدد الأزرار: {buttons_count}",
+            reply_markup=back("welcome_menu")
+        )
     elif data == "welcome_menu":
         await query.edit_message_text("🎉 قسم الترحيب", reply_markup=welcome_menu())
     elif data == "rules_menu":
@@ -1046,6 +1109,23 @@ async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cfg["note_text"] = text
     elif waiting == "set_welcome_photo":
         cfg["welcome_photo"] = text
+    elif waiting == "set_buttons":
+        buttons = []
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            if "|" not in line:
+                await update.message.reply_text("❌ الصيغة غلط\nمثال:\nالقوانين | https://t.me/xxxxx")
+                return
+            btn_text, btn_url = line.split("|", 1)
+            btn_text = btn_text.strip()
+            btn_url = btn_url.strip()
+            if not btn_text or not btn_url:
+                await update.message.reply_text("❌ الصيغة غلط\nمثال:\nالقوانين | https://t.me/xxxxx")
+                return
+            buttons.append({"text": btn_text, "url": btn_url})
+        cfg["welcome_buttons"] = buttons
     elif waiting == "set_group_link":
         cfg["group_link"] = text
     elif waiting == "set_log_channel":
@@ -1090,9 +1170,7 @@ async def send_welcome_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int,
         return
 
     text = format_welcome(cfg, member.first_name or "يا هلا", group_name, member.id)
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📜 عرض القوانين", callback_data="show_rules_btn")]
-    ])
+    keyboard = build_welcome_keyboard(cfg)
 
     if cfg["welcome_photo"]:
         try:
@@ -1103,7 +1181,7 @@ async def send_welcome_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int,
                 photo=cfg["welcome_photo"],
                 caption=text,
                 reply_markup=keyboard,
-                show_caption_above_media=True,
+                show_caption_above_media=cfg.get("media_below_text", True),
             )
             return
         except Exception as e:
