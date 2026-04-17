@@ -593,12 +593,15 @@ async def cmd_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             if len(text) > 1024:
                 text = text[:1000] + "..."
-            await update.message.reply_photo(
-                photo=cfg["welcome_photo"],
-                caption=text,
-                reply_markup=keyboard,
-                show_caption_above_media=cfg.get("media_below_text", True),
-            )
+            if cfg.get("media_below_text", True):
+                await update.message.reply_text(text, reply_markup=keyboard)
+                await update.message.reply_photo(photo=cfg["welcome_photo"])
+            else:
+                await update.message.reply_photo(
+                    photo=cfg["welcome_photo"],
+                    caption=text,
+                    reply_markup=keyboard,
+                )
             return
         except Exception as e:
             print(f"/welcome photo error: {e}")
@@ -856,13 +859,23 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if cfg.get("welcome_photo"):
             try:
-                await context.bot.send_photo(
-                    chat_id=query.message.chat_id,
-                    photo=cfg["welcome_photo"],
-                    caption=preview_text[:1024],
-                    reply_markup=keyboard,
-                    show_caption_above_media=cfg.get("media_below_text", True),
-                )
+                if cfg.get("media_below_text", True):
+                    await context.bot.send_message(
+                        chat_id=query.message.chat_id,
+                        text=preview_text,
+                        reply_markup=keyboard,
+                    )
+                    await context.bot.send_photo(
+                        chat_id=query.message.chat_id,
+                        photo=cfg["welcome_photo"],
+                    )
+                else:
+                    await context.bot.send_photo(
+                        chat_id=query.message.chat_id,
+                        photo=cfg["welcome_photo"],
+                        caption=preview_text[:1024],
+                        reply_markup=keyboard,
+                    )
             except Exception as e:
                 await context.bot.send_message(query.message.chat_id, f"تعذر إرسال المعاينة بالصورة: {e}")
         else:
@@ -1176,13 +1189,23 @@ async def send_welcome_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int,
         try:
             if len(text) > 1024:
                 text = text[:1000] + "..."
-            await context.bot.send_photo(
-                chat_id=chat_id,
-                photo=cfg["welcome_photo"],
-                caption=text,
-                reply_markup=keyboard,
-                show_caption_above_media=cfg.get("media_below_text", True),
-            )
+            if cfg.get("media_below_text", True):
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=text,
+                    reply_markup=keyboard,
+                )
+                await context.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=cfg["welcome_photo"],
+                )
+            else:
+                await context.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=cfg["welcome_photo"],
+                    caption=text,
+                    reply_markup=keyboard,
+                )
             return
         except Exception as e:
             print(f"Welcome photo error: {e}")
