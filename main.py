@@ -159,6 +159,17 @@ def get_group(chat_id: int) -> dict[str, Any] | None:
     return DATA["groups"].get(str(chat_id))
 
 
+def get_or_create_group(chat_id: int, title: str = "") -> dict[str, Any]:
+    cfg = get_group(chat_id)
+    if cfg is None:
+        cfg = ensure_group(chat_id, title)
+        save_data()
+    elif title and cfg.get("title") != title:
+        cfg["title"] = title
+        save_data()
+    return cfg
+
+
 def user_state(user_id: int) -> dict[str, Any]:
     if user_id not in owner_states:
         owner_states[user_id] = {"selected_group": None, "waiting": None, "temp_key": None}
@@ -533,10 +544,7 @@ async def cmd_bindgroup(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    cfg = get_group(update.effective_chat.id)
-    if not cfg:
-        await update.message.reply_text("هذا القروب غير مربوط. استخدم /bindgroup")
-        return
+    cfg = get_or_create_group(update.effective_chat.id, update.effective_chat.title or "")
 
     await update.message.reply_text(cfg["rules_text"])
 
@@ -548,10 +556,7 @@ async def cmd_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    cfg = get_group(update.effective_chat.id)
-    if not cfg:
-        await update.message.reply_text("هذا القروب غير مربوط. استخدم /bindgroup")
-        return
+    cfg = get_or_create_group(update.effective_chat.id, update.effective_chat.title or "")
 
     text = format_welcome(
         cfg,
@@ -576,18 +581,12 @@ async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_admin(update, context):
         await update.message.reply_text("هذا الأمر للمشرفين فقط.")
         return
-    cfg = get_group(update.effective_chat.id)
-    if not cfg:
-        await update.message.reply_text("هذا القروب غير مربوط.")
-        return
+    cfg = get_or_create_group(update.effective_chat.id, update.effective_chat.title or "")
     await update.message.reply_text(settings_summary(str(update.effective_chat.id)))
 
 
 async def cmd_warns(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    cfg = get_group(update.effective_chat.id)
-    if not cfg:
-        await update.message.reply_text("هذا القروب غير مربوط.")
-        return
+    cfg = get_or_create_group(update.effective_chat.id, update.effective_chat.title or "")
     target = update.message.reply_to_message.from_user if update.message.reply_to_message and update.message.reply_to_message.from_user else update.effective_user
     count = int(cfg["warnings"].get(str(target.id), 0))
     await update.message.reply_text(f"⚠️ عدد تحذيرات {target.first_name}: {count}")
@@ -597,10 +596,7 @@ async def cmd_clearwarns(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_admin(update, context):
         await update.message.reply_text("هذا الأمر للمشرفين فقط.")
         return
-    cfg = get_group(update.effective_chat.id)
-    if not cfg:
-        await update.message.reply_text("هذا القروب غير مربوط.")
-        return
+    cfg = get_or_create_group(update.effective_chat.id, update.effective_chat.title or "")
     if not update.message.reply_to_message or not update.message.reply_to_message.from_user:
         await update.message.reply_text("رد على رسالة الشخص ثم استخدم /clearwarns")
         return
@@ -1060,7 +1056,7 @@ def _welcome_cache(context: ContextTypes.DEFAULT_TYPE) -> dict[str, str]:
     return context.application.bot_data.setdefault("recent_welcomes", {})
 
 
-def _already_welcomed(context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int, ttl_seconds: int = 30) -> bool:
+def _already_welcomed(context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int, ttl_seconds: int = 8) -> bool:
     cache = _welcome_cache(context)
     key = f"{chat_id}:{user_id}"
     now = datetime.now(timezone.utc)
@@ -1100,13 +1096,27 @@ async def send_welcome_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int,
             pass
 
 
+async def handle_my_chat_member_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.my_chat_member:
+        return
+
+    chat = update.my_chat_member.chat
+    if chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
+        return
+
+    new_status = getattr(update.my_chat_member.new_chat_member, "status", None)
+    if new_status in {"administrator", "member"}:
+        ensure_group(chat.id, chat.title or "")
+        save_data()
+
+
 async def handle_chat_member_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.chat_member:
         return
 
     chat = update.chat_member.chat
-    cfg = get_group(chat.id)
-    if not cfg or not cfg["welcome_enabled"]:
+    cfg = get_or_create_group(chat.id, chat.title or "")
+    if not cfg["welcome_enabled"]:
         return
 
     old_status = getattr(update.chat_member.old_chat_member, "status", None)
@@ -1128,8 +1138,8 @@ async def handle_chat_member_update(update: Update, context: ContextTypes.DEFAUL
 async def handle_new_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.new_chat_members:
         return
-    cfg = get_group(update.effective_chat.id)
-    if not cfg or not cfg["welcome_enabled"]:
+    cfg = get_or_create_group(update.effective_chat.id, update.effective_chat.title or "")
+    if not cfg["welcome_enabled"]:
         return
 
     group_name = update.effective_chat.title or "القروب"
@@ -1153,9 +1163,7 @@ async def handle_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
         return
 
-    cfg = get_group(update.effective_chat.id)
-    if not cfg:
-        return
+    cfg = get_or_create_group(update.effective_chat.id, update.effective_chat.title or "")
 
     user = update.effective_user
     text = update.message.text.strip()
@@ -1220,10 +1228,11 @@ def main():
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, handle_private))
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, handle_new_members))
     app.add_handler(ChatMemberHandler(handle_chat_member_update, ChatMemberHandler.CHAT_MEMBER))
+    app.add_handler(ChatMemberHandler(handle_my_chat_member_update, ChatMemberHandler.MY_CHAT_MEMBER))
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, handle_group_text))
 
     print("Bot is running...")
-    app.run_polling()
+    app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
 
 if __name__ == "__main__":
