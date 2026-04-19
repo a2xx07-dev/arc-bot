@@ -93,6 +93,20 @@ DEFAULT_GROUP = {
     "mute_after": 3,
     "ban_after": 5,
     "vip_mode": True,
+    "commands_intro_text": (
+        "أوامر المجموعة\n\n"
+        "📌 أوامر سكوربين\nكل ما يخص سكوربين العادي والبرو\n\n"
+        "📌 أوامر اللمس\nكل ما يخص قطع اللمس ودمج الأزرار\n\n"
+        "📌 أوامر النقل\nكل ما يخص النقل والشاشات الخارجية والوصلات\n\n"
+        "📌 أوامر الخدمات\nأوامر الخدمات التي يوفرها متجرنا\n\n"
+        "✍️ اكتب اسم الأمر واضغط Enter ويطلع لك المطلوب مباشرة"
+    ),
+    "command_categories": {
+        "سكوربين": {"description": "كل ما يخص سكوربين العادي والبرو", "commands": {}},
+        "اللمس": {"description": "كل ما يخص قطع اللمس مثل لي يونق القديمة وقطعة دمج الأزرار", "commands": {}},
+        "النقل": {"description": "كل ما يخص النقل والشاشات الخارجية والوصلات", "commands": {}},
+        "الخدمات": {"description": "أوامر الخدمات التي يوفرها متجرنا", "commands": {}},
+    },
 }
 
 owner_states: dict[int, dict[str, Any]] = {}
@@ -133,6 +147,28 @@ def load_data() -> dict[str, Any]:
                 merged["welcome_buttons"] = []
             if "media_below_text" not in merged:
                 merged["media_below_text"] = True
+            if not isinstance(merged.get("command_categories"), dict):
+                merged["command_categories"] = deepcopy(DEFAULT_GROUP["command_categories"])
+            else:
+                for cat_name, cat_cfg in deepcopy(DEFAULT_GROUP["command_categories"]).items():
+                    current = merged["command_categories"].get(cat_name)
+                    if not isinstance(current, dict):
+                        merged["command_categories"][cat_name] = deepcopy(cat_cfg)
+                        continue
+                    if not isinstance(current.get("description"), str):
+                        current["description"] = cat_cfg["description"]
+                    if not isinstance(current.get("commands"), dict):
+                        current["commands"] = {}
+                for cat_name, cat_cfg in list(merged["command_categories"].items()):
+                    if not isinstance(cat_cfg, dict):
+                        merged["command_categories"][cat_name] = {"description": "", "commands": {}}
+                        continue
+                    if not isinstance(cat_cfg.get("description"), str):
+                        cat_cfg["description"] = ""
+                    if not isinstance(cat_cfg.get("commands"), dict):
+                        cat_cfg["commands"] = {}
+            if not isinstance(merged.get("commands_intro_text"), str):
+                merged["commands_intro_text"] = DEFAULT_GROUP["commands_intro_text"]
             data["groups"][gid] = merged
         return data
     except Exception:
@@ -462,11 +498,80 @@ def vip_hub() -> InlineKeyboardMarkup:
          InlineKeyboardButton("🛡️ الحماية", callback_data="protect_menu")],
         [InlineKeyboardButton("🛠️ أوامر المشرفين", callback_data="admins_menu"),
          InlineKeyboardButton("💾 النسخ الاحتياطي", callback_data="backup_menu")],
-        [InlineKeyboardButton("📜 الأوامر", callback_data="commands_menu"),
+        [InlineKeyboardButton("🧾 أوامر المجموعة", callback_data="commands_menu"),
          InlineKeyboardButton("📌 التثبيت", callback_data="pin_menu")],
         [InlineKeyboardButton("⬅️ العودة", callback_data="main")],
     ])
 
+
+
+
+def commands_menu(gid: str) -> InlineKeyboardMarkup:
+    cfg = DATA["groups"][gid]
+    rows = [
+        [InlineKeyboardButton("📖 رسالة قسم الأوامر", callback_data="show_commands_intro")],
+        [InlineKeyboardButton("📝 تعديل رسالة القسم", callback_data="set_commands_intro")],
+        [InlineKeyboardButton("📋 عرض الأقسام والأوامر", callback_data="show_commands_catalog")],
+        [InlineKeyboardButton("➕ إضافة أمر", callback_data="add_exact_command")],
+        [InlineKeyboardButton("🗑️ حذف أمر", callback_data="delete_exact_command")],
+    ]
+    for cat_name in cfg.get("command_categories", {}).keys():
+        rows.append([InlineKeyboardButton(f"📌 أوامر {cat_name}", callback_data=f"commands_category:{cat_name}")])
+    rows.append([InlineKeyboardButton("⬅️ العودة", callback_data="vip_hub")])
+    return InlineKeyboardMarkup(rows)
+
+
+def command_category_menu(gid: str, cat_name: str) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton("📝 تعديل وصف القسم", callback_data=f"set_category_desc:{cat_name}")],
+        [InlineKeyboardButton("📋 عرض أوامر القسم", callback_data=f"show_category_commands:{cat_name}")],
+        [InlineKeyboardButton("➕ إضافة أمر لهذا القسم", callback_data=f"add_command_in:{cat_name}")],
+        [InlineKeyboardButton("🗑️ حذف أمر من هذا القسم", callback_data=f"delete_command_in:{cat_name}")],
+        [InlineKeyboardButton("⬅️ العودة", callback_data="commands_menu")],
+    ]
+    return InlineKeyboardMarkup(rows)
+
+
+def build_commands_overview_text(cfg: dict[str, Any]) -> str:
+    lines = [cfg.get("commands_intro_text", "أوامر المجموعة"), ""]
+    for cat_name, cat_cfg in cfg.get("command_categories", {}).items():
+        desc = str(cat_cfg.get("description", "")).strip()
+        lines.append(f"📌 أوامر {cat_name}")
+        if desc:
+            lines.append(desc)
+        cmds = cat_cfg.get("commands", {})
+        if cmds:
+            for cmd_name in cmds.keys():
+                lines.append(f"• {cmd_name}")
+        else:
+            lines.append("لا يوجد أوامر حالياً")
+        lines.append("")
+    return "\n".join(lines).strip()
+
+
+def build_single_category_text(cfg: dict[str, Any], cat_name: str) -> str:
+    cat_cfg = cfg.get("command_categories", {}).get(cat_name, {})
+    desc = str(cat_cfg.get("description", "")).strip()
+    cmds = cat_cfg.get("commands", {})
+    lines = [f"📌 أوامر {cat_name}"]
+    if desc:
+        lines.append(desc)
+    lines.append("")
+    if cmds:
+        for cmd_name in cmds.keys():
+            lines.append(f"• {cmd_name}")
+    else:
+        lines.append("لا يوجد أوامر حالياً")
+    return "\n".join(lines).strip()
+
+
+def find_exact_command(cfg: dict[str, Any], text: str) -> str | None:
+    needle = text.strip().casefold()
+    for cat_cfg in cfg.get("command_categories", {}).values():
+        for cmd_name, cmd_reply in cat_cfg.get("commands", {}).items():
+            if cmd_name.strip().casefold() == needle:
+                return cmd_reply
+    return None
 
 async def pin_note_now(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str) -> None:
     try:
@@ -884,6 +989,50 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("✅ تم إرسال المعاينة.", reply_markup=welcome_menu())
         return
 
+
+    if data == "commands_menu":
+        await query.edit_message_text("🧾 قسم أوامر المجموعة", reply_markup=commands_menu(gid))
+        return
+
+    if data == "show_commands_intro":
+        await query.edit_message_text(cfg.get("commands_intro_text", "أوامر المجموعة"), reply_markup=back("commands_menu"))
+        return
+
+    if data == "show_commands_catalog":
+        await query.edit_message_text(build_commands_overview_text(cfg), reply_markup=back("commands_menu"))
+        return
+
+    if data.startswith("commands_category:"):
+        cat_name = data.split(":", 1)[1]
+        await query.edit_message_text(build_single_category_text(cfg, cat_name), reply_markup=command_category_menu(gid, cat_name))
+        return
+
+    if data.startswith("show_category_commands:"):
+        cat_name = data.split(":", 1)[1]
+        await query.edit_message_text(build_single_category_text(cfg, cat_name), reply_markup=command_category_menu(gid, cat_name))
+        return
+
+    if data.startswith("set_category_desc:"):
+        cat_name = data.split(":", 1)[1]
+        st["waiting"] = "set_category_desc"
+        st["temp_key"] = cat_name
+        await query.edit_message_text(f"أرسل وصف قسم {cat_name}.", reply_markup=back("commands_menu"))
+        return
+
+    if data.startswith("add_command_in:"):
+        cat_name = data.split(":", 1)[1]
+        st["waiting"] = "add_exact_command_name"
+        st["temp_category"] = cat_name
+        await query.edit_message_text(f"أرسل اسم الأمر الجديد داخل قسم {cat_name}.", reply_markup=back("commands_menu"))
+        return
+
+    if data.startswith("delete_command_in:"):
+        cat_name = data.split(":", 1)[1]
+        st["waiting"] = "delete_exact_command_name"
+        st["temp_category"] = cat_name
+        await query.edit_message_text(f"أرسل اسم الأمر الذي تريد حذفه من قسم {cat_name}.", reply_markup=back("commands_menu"))
+        return
+
     toggle_map = {
         "toggle_anti_spam": "anti_spam",
         "toggle_anti_flood": "anti_flood",
@@ -930,6 +1079,9 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "set_note": ("set_note", "أرسل النص المثبت الجديد."),
         "set_welcome_photo": ("set_welcome_photo", "أرسل رابط الصورة أو file_id أو أرسل صورة في الخاص."),
         "set_buttons": ("set_buttons", "أرسل الزر بهذا الشكل:\nاسم الزر | الرابط\nوتقدر ترسل أكثر من زر، كل زر في سطر."),
+        "set_commands_intro": ("set_commands_intro", "أرسل رسالة قسم الأوامر الجديدة."),
+        "add_exact_command": ("add_exact_command_name", "أرسل اسم الأمر الجديد."),
+        "delete_exact_command": ("delete_exact_command_name", "أرسل اسم الأمر الذي تريد حذفه."),
         "set_group_link": ("set_group_link", "أرسل رابط المجموعة."),
         "set_log_channel": ("set_log_channel", "أرسل يوزر قناة السجل أو ID."),
         "set_discussion_group": ("set_discussion_group", "أرسل رابط أو آيدي مجموعة المناقشة."),
@@ -1027,26 +1179,7 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ok = restore_backup()
         await query.edit_message_text("✅ تم استرجاع النسخة." if ok else "❌ لا توجد نسخة احتياطية.", reply_markup=backup_menu())
     elif data == "commands_menu":
-        await query.edit_message_text(
-            "📜 أوامر البوت:\n\n"
-            "👤 أوامر عامة:\n"
-            "/id - عرض الآيدي\n"
-            "/rules - عرض القوانين\n"
-            "/welcome - عرض رسالة الترحيب\n"
-            "/settings - عرض إعدادات القروب\n\n"
-            "🛡️ أوامر المشرفين:\n"
-            "/warn - تحذير عضو بالرد\n"
-            "/warns - عرض تحذيرات عضو\n"
-            "/clearwarns - تصفير التحذيرات\n"
-            "/mute - كتم عضو بالرد\n"
-            "/unmute - فك الكتم بالرد\n"
-            "/ban - حظر عضو بالرد\n"
-            "/unban user_id - فك الحظر\n"
-            "/setnote نص - تغيير الملاحظة المثبتة\n"
-            "/clean - حذف الرسالة بالرد\n"
-            "/bindgroup - ربط القروب\n",
-            reply_markup=back("vip_hub"),
-        )
+        await query.edit_message_text("🧾 قسم أوامر المجموعة", reply_markup=commands_menu(gid))
     elif data == "farewell_menu":
         await query.edit_message_text("👋 قسم الوداع جاهز كواجهة حالياً. إذا تبي أربطه برسالة خروج لاحقاً أقدر.", reply_markup=back("settings_menu"))
     elif data == "restrictions_menu":
@@ -1139,6 +1272,57 @@ async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             buttons.append({"text": btn_text, "url": btn_url})
         cfg["welcome_buttons"] = buttons
+    elif waiting == "set_commands_intro":
+        cfg["commands_intro_text"] = text
+    elif waiting == "set_category_desc":
+        cat_name = st.get("temp_key") or st.get("temp_category")
+        if cat_name:
+            cfg["command_categories"].setdefault(cat_name, {"description": "", "commands": {}})
+            cfg["command_categories"][cat_name]["description"] = text
+            st["temp_key"] = None
+            st["temp_category"] = None
+    elif waiting == "add_exact_command_name":
+        st["temp_command_name"] = text
+        st["waiting"] = "add_exact_command_reply"
+        if not st.get("temp_category"):
+            st["waiting"] = "add_exact_command_pick_category"
+            categories_text = "\n".join([f"• {name}" for name in cfg["command_categories"].keys()])
+            await update.message.reply_text(f"أرسل اسم القسم لهذا الأمر.\n\nالأقسام المتاحة:\n{categories_text}")
+            return
+        await update.message.reply_text("أرسل الرد أو الرابط الخاص بهذا الأمر.")
+        return
+    elif waiting == "add_exact_command_pick_category":
+        cat_name = text
+        if cat_name not in cfg["command_categories"]:
+            await update.message.reply_text("❌ هذا القسم غير موجود. أرسل اسم قسم صحيح.")
+            return
+        st["temp_category"] = cat_name
+        st["waiting"] = "add_exact_command_reply"
+        await update.message.reply_text("أرسل الرد أو الرابط الخاص بهذا الأمر.")
+        return
+    elif waiting == "add_exact_command_reply":
+        cmd_name = st.get("temp_command_name")
+        cat_name = st.get("temp_category")
+        if cmd_name and cat_name:
+            cfg["command_categories"].setdefault(cat_name, {"description": "", "commands": {}})
+            cfg["command_categories"][cat_name]["commands"][cmd_name] = text
+        st["temp_command_name"] = None
+        st["temp_category"] = None
+    elif waiting == "delete_exact_command_name":
+        target_name = text.strip().casefold()
+        target_category = st.get("temp_category")
+        deleted = False
+        for cat_name, cat_cfg in cfg["command_categories"].items():
+            if target_category and cat_name != target_category:
+                continue
+            for cmd_name in list(cat_cfg.get("commands", {}).keys()):
+                if cmd_name.strip().casefold() == target_name:
+                    del cat_cfg["commands"][cmd_name]
+                    deleted = True
+                    break
+            if deleted:
+                break
+        st["temp_category"] = None
     elif waiting == "set_group_link":
         cfg["group_link"] = text
     elif waiting == "set_log_channel":
@@ -1313,11 +1497,29 @@ async def handle_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await warn_user(update, context, "رسالة طويلة جداً")
             return
 
+    if text.strip().casefold() in {"الأوامر", "اوامر", "/commands"}:
+        await update.message.reply_text(build_commands_overview_text(cfg), reply_markup=commands_menu(str(update.effective_chat.id)))
+        return
+
+    exact_command_reply = find_exact_command(cfg, text)
+    if exact_command_reply is not None:
+        await update.message.reply_text(exact_command_reply)
+        return
+
     for key, reply in cfg["auto_replies"].items():
         if key and key.lower() in text.lower():
             await update.message.reply_text(reply)
             break
 
+
+
+
+async def cmd_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
+        await update.message.reply_text("استخدم هذا الأمر داخل القروب.")
+        return
+    cfg = get_or_create_group(update.effective_chat.id, update.effective_chat.title or "")
+    await update.message.reply_text(build_commands_overview_text(cfg), reply_markup=commands_menu(str(update.effective_chat.id)))
 
 def main():
     if not TOKEN:
@@ -1330,6 +1532,7 @@ def main():
     app.add_handler(CommandHandler("bindgroup", cmd_bindgroup))
     app.add_handler(CommandHandler("rules", cmd_rules))
     app.add_handler(CommandHandler("welcome", cmd_welcome))
+    app.add_handler(CommandHandler("commands", cmd_commands))
     app.add_handler(CommandHandler("settings", cmd_settings))
     app.add_handler(CommandHandler("warns", cmd_warns))
     app.add_handler(CommandHandler("clearwarns", cmd_clearwarns))
