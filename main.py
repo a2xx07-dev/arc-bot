@@ -572,9 +572,7 @@ def build_public_commands_keyboard(cfg: dict[str, Any], cat_name: str) -> Inline
 
 def build_public_commands_intro_text(cfg: dict[str, Any]) -> str:
     return (
-        f"{cfg.get('commands_intro_text', 'أوامر المجموعة')}
-
-"
+        f"{cfg.get('commands_intro_text', 'أوامر المجموعة')}\n\n"
         "👇 اضغط على القسم المناسب لك"
     )
 
