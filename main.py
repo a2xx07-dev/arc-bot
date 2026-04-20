@@ -1047,7 +1047,10 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = query.from_user
     if not is_owner(user.id):
-        await query.edit_message_text("هذا البوت مخصص للإدارة فقط.")
+        try:
+            await query.answer("هذه اللوحة للإدارة فقط", show_alert=True)
+        except Exception:
+            pass
         return
 
     st = user_state(user.id)
