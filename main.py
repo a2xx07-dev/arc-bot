@@ -573,6 +573,172 @@ def find_exact_command(cfg: dict[str, Any], text: str) -> str | None:
                 return cmd_reply
     return None
 
+
+
+ARABIC_TO_ENGLISH_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+
+
+def normalize_digits(value: str) -> str:
+    return value.translate(ARABIC_TO_ENGLISH_DIGITS)
+
+
+def build_commands_numbers_text(cfg: dict[str, Any]) -> str:
+    lines = [cfg.get("commands_intro_text", "أوامر المجموعة"), "", "📋 قائمة الأوامر بالأرقام:"]
+    idx = 1
+    for cat_name, cat_cfg in cfg.get("command_categories", {}).items():
+        desc = str(cat_cfg.get("description", "")).strip()
+        cmds = cat_cfg.get("commands", {})
+        if not cmds:
+            continue
+        lines.append("")
+        lines.append(f"📌 أوامر {cat_name}")
+        if desc:
+            lines.append(desc)
+        for cmd_name in cmds.keys():
+            lines.append(f"{idx}- {cmd_name}")
+            idx += 1
+    if idx == 1:
+        lines.append("لا يوجد أوامر حالياً")
+    else:
+        lines.append("")
+        lines.append("✍️ اكتب رقم الأمر فقط وسيظهر لك الرد مباشرة")
+    return "\n".join(lines).strip()
+
+
+def get_command_reply_by_number(cfg: dict[str, Any], text: str) -> str | None:
+    normalized = normalize_digits(text.strip())
+    if not normalized.isdigit():
+        return None
+    wanted = int(normalized)
+    idx = 1
+    for cat_cfg in cfg.get("command_categories", {}).values():
+        for _cmd_name, cmd_reply in cat_cfg.get("commands", {}).items():
+            if idx == wanted:
+                return cmd_reply
+            idx += 1
+    return None
+
+
+async def handle_admin_text_command(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
+    if not update.message or not update.effective_chat or not update.effective_user:
+        return False
+    if not await is_target_admin(context, update.effective_chat.id, update.effective_user.id):
+        return False
+
+    normalized = normalize_digits(text.strip())
+    compact = normalized.replace("_", " ").strip()
+    base = compact.split(maxsplit=1)[0].strip().lower() if compact else ""
+    reply_msg = update.message.reply_to_message
+
+    if compact in {"ايدي", "آيدي"}:
+        await cmd_id(update, context)
+        return True
+
+    if base in {"تحذير", "انذار", "إنذار"}:
+        if not reply_msg or not reply_msg.from_user:
+            await update.message.reply_text("رد على رسالة العضو ثم اكتب: تحذير")
+            return True
+        target = reply_msg.from_user
+        if await is_target_admin(context, update.effective_chat.id, target.id):
+            await update.message.reply_text("لا يمكن إنذار مشرف.")
+            return True
+        cfg = ensure_group(update.effective_chat.id, update.effective_chat.title or "")
+        uid = str(target.id)
+        count = int(cfg["warnings"].get(uid, 0)) + 1
+        cfg["warnings"][uid] = count
+        save_data()
+        await update.message.reply_text(f"⚠️ تم إنذار {target.first_name}. عدد التحذيرات: {count}")
+        return True
+
+    if compact in {"مسح التحذيرات", "تصفير التحذيرات"}:
+        if not reply_msg or not reply_msg.from_user:
+            await update.message.reply_text("رد على رسالة العضو ثم اكتب: مسح التحذيرات")
+            return True
+        target = reply_msg.from_user
+        cfg = get_or_create_group(update.effective_chat.id, update.effective_chat.title or "")
+        cfg["warnings"][str(target.id)] = 0
+        save_data()
+        await update.message.reply_text(f"✅ تم تصفير تحذيرات {target.first_name}")
+        return True
+
+    if base in {"كتم", "ميوت"}:
+        if not reply_msg or not reply_msg.from_user:
+            await update.message.reply_text("رد على رسالة العضو ثم اكتب: كتم")
+            return True
+        target = reply_msg.from_user
+        if await is_target_admin(context, update.effective_chat.id, target.id):
+            await update.message.reply_text("لا يمكن كتم مشرف.")
+            return True
+        try:
+            until = datetime.now(timezone.utc) + timedelta(minutes=30)
+            await context.bot.restrict_chat_member(
+                update.effective_chat.id,
+                target.id,
+                permissions=ChatPermissions(can_send_messages=False),
+                until_date=until,
+            )
+            await update.message.reply_text(f"🔇 تم كتم {target.first_name} 30 دقيقة.")
+        except Exception:
+            await update.message.reply_text("تعذر الكتم.")
+        return True
+
+    if compact in {"فك الكتم", "الغاء الكتم", "إلغاء الكتم"}:
+        if not reply_msg or not reply_msg.from_user:
+            await update.message.reply_text("رد على رسالة العضو ثم اكتب: فك الكتم")
+            return True
+        target = reply_msg.from_user
+        try:
+            await context.bot.restrict_chat_member(
+                update.effective_chat.id,
+                target.id,
+                permissions=ChatPermissions(
+                    can_send_messages=True,
+                    can_send_audios=True,
+                    can_send_documents=True,
+                    can_send_photos=True,
+                    can_send_videos=True,
+                    can_send_video_notes=True,
+                    can_send_voice_notes=True,
+                    can_send_polls=True,
+                    can_send_other_messages=True,
+                    can_add_web_page_previews=True,
+                ),
+            )
+            await update.message.reply_text(f"✅ تم فك كتم {target.first_name}.")
+        except Exception:
+            await update.message.reply_text("تعذر فك الكتم.")
+        return True
+
+    if base in {"طرد", "حظر", "تبنيد", "بان"}:
+        if not reply_msg or not reply_msg.from_user:
+            await update.message.reply_text("رد على رسالة العضو ثم اكتب: حظر")
+            return True
+        target = reply_msg.from_user
+        if await is_target_admin(context, update.effective_chat.id, target.id):
+            await update.message.reply_text("لا يمكن حظر مشرف.")
+            return True
+        try:
+            await context.bot.ban_chat_member(update.effective_chat.id, target.id)
+            await update.message.reply_text(f"⛔ تم حظر {target.first_name}.")
+        except Exception:
+            await update.message.reply_text("تعذر الحظر.")
+        return True
+
+    if compact.startswith("فك الحظر") or compact.startswith("الغاء الحظر") or compact.startswith("إلغاء الحظر"):
+        parts = compact.split(maxsplit=2)
+        if len(parts) < 3 or not parts[2].strip().isdigit():
+            await update.message.reply_text("اكتب هكذا: فك الحظر 123456789")
+            return True
+        try:
+            user_id = int(parts[2].strip())
+            await context.bot.unban_chat_member(update.effective_chat.id, user_id, only_if_banned=True)
+            await update.message.reply_text("✅ تم فك الحظر.")
+        except Exception:
+            await update.message.reply_text("تعذر فك الحظر.")
+        return True
+
+    return False
+
 async def pin_note_now(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str) -> None:
     try:
         msg = await context.bot.send_message(chat_id, text)
@@ -1497,8 +1663,34 @@ async def handle_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await warn_user(update, context, "رسالة طويلة جداً")
             return
 
-    if text.strip().casefold() in {"الأوامر", "اوامر", "/commands"}:
-        await update.message.reply_text(build_commands_overview_text(cfg), reply_markup=commands_menu(str(update.effective_chat.id)))
+    admin_handled = await handle_admin_text_command(update, context, text)
+    if admin_handled:
+        return
+
+    normalized_text = normalize_digits(text).strip()
+    if normalized_text.casefold() in {"الأوامر", "اوامر", "/commands"}:
+        await update.message.reply_text(build_commands_numbers_text(cfg), reply_markup=commands_menu(str(update.effective_chat.id)))
+        return
+
+    if normalized_text in {"القوانين", "قوانين"}:
+        await cmd_rules(update, context)
+        return
+
+    if normalized_text in {"الترحيب", "ترحيب"}:
+        await cmd_welcome(update, context)
+        return
+
+    if normalized_text in {"الإعدادات", "الاعدادات", "اعدادات"}:
+        await cmd_settings(update, context)
+        return
+
+    if normalized_text in {"آيدي", "ايدي"}:
+        await cmd_id(update, context)
+        return
+
+    number_command_reply = get_command_reply_by_number(cfg, normalized_text)
+    if number_command_reply is not None:
+        await update.message.reply_text(number_command_reply)
         return
 
     exact_command_reply = find_exact_command(cfg, text)
@@ -1519,7 +1711,7 @@ async def cmd_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("استخدم هذا الأمر داخل القروب.")
         return
     cfg = get_or_create_group(update.effective_chat.id, update.effective_chat.title or "")
-    await update.message.reply_text(build_commands_overview_text(cfg), reply_markup=commands_menu(str(update.effective_chat.id)))
+    await update.message.reply_text(build_commands_numbers_text(cfg), reply_markup=commands_menu(str(update.effective_chat.id)))
 
 def main():
     if not TOKEN:
