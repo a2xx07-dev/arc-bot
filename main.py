@@ -1048,7 +1048,7 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = query.from_user
     if not is_owner(user.id):
         try:
-            await query.answer("هذه اللوحة للإدارة فقط", show_alert=True)
+            await query.answer("هذه اللوحة للإدارة فقط.", show_alert=True)
         except Exception:
             pass
         return
@@ -1672,7 +1672,7 @@ async def handle_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     normalized_text = normalize_digits(text).strip()
     if normalized_text.casefold() in {"الأوامر", "اوامر", "/commands"}:
-        await update.message.reply_text(build_commands_numbers_text(cfg), reply_markup=commands_menu(str(update.effective_chat.id)))
+        await update.message.reply_text(build_commands_numbers_text(cfg))
         return
 
     if normalized_text in {"القوانين", "قوانين"}:
@@ -1714,7 +1714,7 @@ async def cmd_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("استخدم هذا الأمر داخل القروب.")
         return
     cfg = get_or_create_group(update.effective_chat.id, update.effective_chat.title or "")
-    await update.message.reply_text(build_commands_numbers_text(cfg), reply_markup=commands_menu(str(update.effective_chat.id)))
+    await update.message.reply_text(build_commands_numbers_text(cfg))
 
 def main():
     if not TOKEN:
