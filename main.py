@@ -260,6 +260,18 @@ def is_probable_url(text: str) -> bool:
     return bool(re.match(r"^(https?://|www\.|t\.me/)", value, re.IGNORECASE))
 
 
+def split_command_content(content: str) -> tuple[str, str | None]:
+    value = str(content).strip()
+    match = LINK_RE.search(value)
+    if not match:
+        return value, None
+    url = match.group(0).strip()
+    body = (value[:match.start()] + value[match.end():]).strip()
+    if url.lower().startswith("www."):
+        url = "https://" + url
+    return body, url
+
+
 def on_off_text(value: bool) -> str:
     return "✅" if value else "❌"
 
@@ -1141,7 +1153,17 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.answer("هذا القسم غير موجود", show_alert=True)
                 return
             text_msg = build_single_category_text(cfg, cat_name)
-            await query.edit_message_text(text_msg, reply_markup=build_public_commands_keyboard(cfg, cat_name))
+            await query.edit_message_text(text_msg + "\n\n👇 اختر الأمر المناسب لك", reply_markup=build_public_commands_keyboard(cfg, cat_name))
+            return
+
+        if data == "public_close":
+            try:
+                await query.message.delete()
+            except Exception:
+                try:
+                    await query.edit_message_reply_markup(reply_markup=None)
+                except Exception:
+                    pass
             return
 
         if data.startswith("public_cmd:"):
@@ -1153,7 +1175,29 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if cmd_reply is None:
                 await query.answer("هذا الأمر غير موجود", show_alert=True)
                 return
-            await query.message.reply_text(str(cmd_reply))
+
+            body, url = split_command_content(str(cmd_reply))
+            if not body:
+                body = (
+                    f"🚀 {cmd_name}\n\n"
+                    "آخر نسخة جاهزة الآن\n"
+                    "اضغط على زر التحميل تحت 👇"
+                )
+
+            rows = []
+            if url:
+                rows.append([InlineKeyboardButton("⬇️ تحميل الآن", url=url)])
+            rows.append([
+                InlineKeyboardButton("⬅️ رجوع", callback_data=f"public_cat:{cat_name}"),
+                InlineKeyboardButton("🏠 الرئيسية", callback_data="public_back_categories"),
+            ])
+            rows.append([InlineKeyboardButton("❌ إغلاق", callback_data="public_close")])
+
+            await query.edit_message_text(
+                body,
+                reply_markup=InlineKeyboardMarkup(rows),
+                disable_web_page_preview=True,
+            )
             return
 
     if not is_owner(user.id):
