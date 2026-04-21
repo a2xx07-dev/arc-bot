@@ -517,6 +517,9 @@ def commands_menu(gid: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📖 رسالة قسم الأوامر", callback_data="show_commands_intro")],
         [InlineKeyboardButton("📝 تعديل رسالة القسم", callback_data="set_commands_intro")],
         [InlineKeyboardButton("📋 عرض الأقسام والأوامر", callback_data="show_commands_catalog")],
+        [InlineKeyboardButton("🗂️ إضافة قسم", callback_data="add_category")],
+        [InlineKeyboardButton("📝 تغيير اسم قسم", callback_data="rename_category")],
+        [InlineKeyboardButton("🗑️ حذف قسم", callback_data="delete_category")],
         [InlineKeyboardButton("➕ إضافة أمر", callback_data="add_exact_command")],
         [InlineKeyboardButton("🗑️ حذف أمر", callback_data="delete_exact_command")],
     ]
@@ -528,10 +531,12 @@ def commands_menu(gid: str) -> InlineKeyboardMarkup:
 
 def command_category_menu(gid: str, cat_name: str) -> InlineKeyboardMarkup:
     rows = [
+        [InlineKeyboardButton("📝 تعديل اسم القسم", callback_data=f"rename_category_in:{cat_name}")],
         [InlineKeyboardButton("📝 تعديل وصف القسم", callback_data=f"set_category_desc:{cat_name}")],
         [InlineKeyboardButton("📋 عرض أوامر القسم", callback_data=f"show_category_commands:{cat_name}")],
         [InlineKeyboardButton("➕ إضافة أمر لهذا القسم", callback_data=f"add_command_in:{cat_name}")],
         [InlineKeyboardButton("🗑️ حذف أمر من هذا القسم", callback_data=f"delete_command_in:{cat_name}")],
+        [InlineKeyboardButton("🗑️ حذف هذا القسم", callback_data=f"delete_category_in:{cat_name}")],
         [InlineKeyboardButton("⬅️ العودة", callback_data="commands_menu")],
     ]
     return InlineKeyboardMarkup(rows)
@@ -1274,6 +1279,21 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "show_commands_catalog":
         await query.edit_message_text(build_commands_overview_text(cfg), reply_markup=back("commands_menu"))
         return
+    if data == "add_category":
+        st["waiting"] = "add_category_name"
+        await query.edit_message_text("أرسل اسم القسم الجديد.", reply_markup=back("commands_menu"))
+        return
+
+    if data == "rename_category":
+        st["waiting"] = "rename_category_old_name"
+        await query.edit_message_text("أرسل اسم القسم الذي تريد تغيير اسمه.", reply_markup=back("commands_menu"))
+        return
+
+    if data == "delete_category":
+        st["waiting"] = "delete_category_name"
+        await query.edit_message_text("أرسل اسم القسم الذي تريد حذفه.", reply_markup=back("commands_menu"))
+        return
+
 
     if data.startswith("commands_category:"):
         cat_name = data.split(":", 1)[1]
@@ -1283,6 +1303,21 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("show_category_commands:"):
         cat_name = data.split(":", 1)[1]
         await query.edit_message_text(build_single_category_text(cfg, cat_name), reply_markup=command_category_menu(gid, cat_name))
+        return
+
+    if data.startswith("rename_category_in:"):
+        cat_name = data.split(":", 1)[1]
+        st["waiting"] = "rename_category_new_name"
+        st["temp_key"] = cat_name
+        await query.edit_message_text(f"أرسل الاسم الجديد لقسم {cat_name}.", reply_markup=back("commands_menu"))
+        return
+
+    if data.startswith("delete_category_in:"):
+        cat_name = data.split(":", 1)[1]
+        if cat_name in cfg.get("command_categories", {}):
+            del cfg["command_categories"][cat_name]
+            save_data()
+        await query.edit_message_text("✅ تم حذف القسم.", reply_markup=commands_menu(gid))
         return
 
     if data.startswith("set_category_desc:"):
@@ -1547,6 +1582,49 @@ async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cfg["welcome_buttons"] = buttons
     elif waiting == "set_commands_intro":
         cfg["commands_intro_text"] = text
+    elif waiting == "add_category_name":
+        if text in cfg["command_categories"]:
+            await update.message.reply_text("❌ هذا القسم موجود مسبقًا.")
+            return
+        cfg["command_categories"][text] = {"description": "", "commands": {}}
+        st["waiting"] = "add_category_desc"
+        st["temp_key"] = text
+        save_data()
+        await update.message.reply_text("أرسل وصف القسم الجديد.")
+        return
+    elif waiting == "add_category_desc":
+        cat_name = st.get("temp_key")
+        if cat_name:
+            cfg["command_categories"].setdefault(cat_name, {"description": "", "commands": {}})
+            cfg["command_categories"][cat_name]["description"] = text
+            st["temp_key"] = None
+    elif waiting == "rename_category_old_name":
+        if text not in cfg["command_categories"]:
+            await update.message.reply_text("❌ هذا القسم غير موجود.")
+            return
+        st["temp_key"] = text
+        st["waiting"] = "rename_category_new_name"
+        await update.message.reply_text("أرسل الاسم الجديد للقسم.")
+        return
+    elif waiting == "rename_category_new_name":
+        old_name = st.get("temp_key")
+        new_name = text.strip()
+        if not old_name or old_name not in cfg["command_categories"]:
+            await update.message.reply_text("❌ القسم القديم غير موجود.")
+            return
+        if not new_name:
+            await update.message.reply_text("❌ الاسم الجديد غير صالح.")
+            return
+        if new_name != old_name and new_name in cfg["command_categories"]:
+            await update.message.reply_text("❌ يوجد قسم بهذا الاسم مسبقًا.")
+            return
+        cfg["command_categories"][new_name] = cfg["command_categories"].pop(old_name)
+        st["temp_key"] = None
+    elif waiting == "delete_category_name":
+        if text not in cfg["command_categories"]:
+            await update.message.reply_text("❌ هذا القسم غير موجود.")
+            return
+        del cfg["command_categories"][text]
     elif waiting == "set_category_desc":
         cat_name = st.get("temp_key") or st.get("temp_category")
         if cat_name:
