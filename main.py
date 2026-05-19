@@ -1200,6 +1200,27 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
+    # ✅ زر القوانين للكل: أعضاء + مشرفين + المالك
+    # لازم يكون قبل شرط المالك عشان العضو العادي يقدر يشوف القوانين من زر الترحيب
+    if data == "show_rules_btn":
+        chat = query.message.chat if query.message else None
+        if not chat:
+            return
+        cfg = get_or_create_group(chat.id, chat.title or "")
+        try:
+            await query.message.reply_text(cfg["rules_text"])
+            if cfg.get("welcome_photo"):
+                try:
+                    await query.message.reply_photo(cfg["welcome_photo"])
+                except Exception:
+                    pass
+        except Exception:
+            try:
+                await query.answer("تعذر عرض القوانين، تأكد من صلاحيات البوت.", show_alert=True)
+            except Exception:
+                pass
+        return
+
     if not is_owner(user.id):
         try:
             await query.answer("هذه اللوحة للإدارة فقط.", show_alert=True)
