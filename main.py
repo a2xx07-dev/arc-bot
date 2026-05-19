@@ -133,12 +133,15 @@ BADWORDS = load_badwords()
 
 def load_data() -> dict[str, Any]:
     if not DATA_FILE.exists():
-        return {"groups": {}}
+        return {"groups": {}, "bot_admins": [OWNER_ID]}
     try:
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
         if "groups" not in data or not isinstance(data["groups"], dict):
             data["groups"] = {}
+        if "bot_admins" not in data or not isinstance(data["bot_admins"], list):
+            data["bot_admins"] = [OWNER_ID]
+        data["bot_admins"] = list(dict.fromkeys([OWNER_ID] + [int(x) for x in data["bot_admins"] if str(x).isdigit()]))
         for gid, cfg in list(data["groups"].items()):
             merged = deepcopy(DEFAULT_GROUP)
             if isinstance(cfg, dict):
@@ -183,7 +186,7 @@ def load_data() -> dict[str, Any]:
             data["groups"][gid] = merged
         return data
     except Exception:
-        return {"groups": {}}
+        return {"groups": {}, "bot_admins": [OWNER_ID]}
 
 
 def save_data() -> None:
@@ -196,6 +199,35 @@ DATA = load_data()
 
 def is_owner(user_id: int) -> bool:
     return user_id == OWNER_ID
+
+
+def is_bot_admin(user_id: int) -> bool:
+    try:
+        admins = DATA.get("bot_admins", [OWNER_ID])
+        return int(user_id) in [int(x) for x in admins]
+    except Exception:
+        return int(user_id) == OWNER_ID
+
+
+def add_bot_admin_id(user_id: int) -> None:
+    admins = DATA.setdefault("bot_admins", [OWNER_ID])
+    uid = int(user_id)
+    if OWNER_ID not in admins:
+        admins.insert(0, OWNER_ID)
+    if uid not in admins:
+        admins.append(uid)
+    DATA["bot_admins"] = list(dict.fromkeys([int(x) for x in admins]))
+    save_data()
+
+
+def remove_bot_admin_id(user_id: int) -> bool:
+    uid = int(user_id)
+    if uid == OWNER_ID:
+        return False
+    admins = DATA.setdefault("bot_admins", [OWNER_ID])
+    DATA["bot_admins"] = [int(x) for x in admins if int(x) != uid]
+    save_data()
+    return True
 
 
 def ensure_group(chat_id: int, title: str = "") -> dict[str, Any]:
@@ -243,7 +275,7 @@ def selected_group_id(user_id: int) -> str | None:
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not update.effective_user or not update.effective_chat:
         return False
-    if is_owner(update.effective_user.id):
+    if is_bot_admin(update.effective_user.id):
         return True
     try:
         member = await context.bot.get_chat_member(update.effective_chat.id, update.effective_user.id)
@@ -253,7 +285,7 @@ async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
 
 
 async def is_target_admin(context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int) -> bool:
-    if is_owner(user_id):
+    if is_bot_admin(user_id):
         return True
     try:
         member = await context.bot.get_chat_member(chat_id, user_id)
@@ -528,8 +560,18 @@ def vip_hub() -> InlineKeyboardMarkup:
          InlineKeyboardButton("📌 التثبيت", callback_data="pin_menu")],
         [InlineKeyboardButton("🛠️ أوامر المشرفين", callback_data="admins_menu"),
          InlineKeyboardButton("💾 النسخ الاحتياطي", callback_data="backup_menu")],
-        [InlineKeyboardButton("🧾 أوامر المجموعة", callback_data="commands_menu")],
+        [InlineKeyboardButton("👥 مشرفين البوت", callback_data="bot_admins_menu"),
+         InlineKeyboardButton("🧾 أوامر المجموعة", callback_data="commands_menu")],
         [InlineKeyboardButton("⬅️ العودة", callback_data="main")],
+    ])
+
+
+def bot_admins_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕ إضافة مشرف بوت", callback_data="add_bot_admin")],
+        [InlineKeyboardButton("➖ حذف مشرف بوت", callback_data="delete_bot_admin")],
+        [InlineKeyboardButton("📋 عرض مشرفين البوت", callback_data="show_bot_admins")],
+        [InlineKeyboardButton("⬅️ العودة", callback_data="vip_hub")],
     ])
 
 
@@ -977,7 +1019,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     user = update.effective_user
-    if not user or not is_owner(user.id):
+    if not user or not is_bot_admin(user.id):
         await update.message.reply_text("هذا البوت مخصص للإدارة فقط.")
         return
 
@@ -1308,7 +1350,7 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
         return
 
-    if not is_owner(user.id):
+    if not is_bot_admin(user.id):
         try:
             await query.answer("هذه اللوحة للإدارة فقط.", show_alert=True)
         except Exception:
@@ -1346,6 +1388,39 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "vip_hub":
         await query.edit_message_text("👑 لوحة VIP المتقدمة", reply_markup=vip_hub())
+        return
+
+    if data == "bot_admins_menu":
+        await query.edit_message_text(
+            "👥 قسم مشرفين البوت\n\n"
+            "هنا تضيف أشخاص يقدرون يدخلون لوحة البوت ويتحكمون مثل المالك.",
+            reply_markup=bot_admins_menu(),
+        )
+        return
+
+    if data == "show_bot_admins":
+        admins = DATA.get("bot_admins", [OWNER_ID])
+        lines = ["📋 مشرفين البوت:\n"]
+        for i, admin_id in enumerate(admins, start=1):
+            label = "👑 المالك" if int(admin_id) == OWNER_ID else "🛡️ مشرف"
+            lines.append(f"{i}) {label}: {admin_id}")
+        await query.edit_message_text("\n".join(lines), reply_markup=bot_admins_menu())
+        return
+
+    if data == "add_bot_admin":
+        st["waiting"] = "add_bot_admin"
+        await query.edit_message_text(
+            "➕ أرسل آيدي الشخص اللي تبي تخليه مشرف بوت.\n\nمثال: 123456789",
+            reply_markup=bot_admins_menu(),
+        )
+        return
+
+    if data == "delete_bot_admin":
+        st["waiting"] = "delete_bot_admin"
+        await query.edit_message_text(
+            "➖ أرسل آيدي مشرف البوت اللي تبي تحذفه.\n\nملاحظة: لا يمكن حذف المالك الأساسي.",
+            reply_markup=bot_admins_menu(),
+        )
         return
 
     if data == "groups":
@@ -1843,7 +1918,7 @@ async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != ChatType.PRIVATE:
         return
     user = update.effective_user
-    if not user or not is_owner(user.id):
+    if not user or not is_bot_admin(user.id):
         return
     if not update.message:
         return
@@ -1870,6 +1945,29 @@ async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cfg = DATA["groups"][gid]
     waiting = st.get("waiting")
     text = update.message.text.strip()
+
+    if waiting == "add_bot_admin":
+        try:
+            uid = int(normalize_digits(text))
+            add_bot_admin_id(uid)
+            st["waiting"] = None
+            await update.message.reply_text(f"✅ تم إضافة مشرف البوت:\n{uid}", reply_markup=main_menu(user.id))
+        except Exception:
+            await update.message.reply_text("❌ أرسل آيدي صحيح أرقام فقط.")
+        return
+
+    if waiting == "delete_bot_admin":
+        try:
+            uid = int(normalize_digits(text))
+            ok = remove_bot_admin_id(uid)
+            st["waiting"] = None
+            if ok:
+                await update.message.reply_text(f"✅ تم حذف مشرف البوت:\n{uid}", reply_markup=main_menu(user.id))
+            else:
+                await update.message.reply_text("❌ لا يمكن حذف المالك الأساسي.", reply_markup=main_menu(user.id))
+        except Exception:
+            await update.message.reply_text("❌ أرسل آيدي صحيح أرقام فقط.")
+        return
 
     if waiting == "edit_auto_ad":
         try:
