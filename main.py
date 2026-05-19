@@ -95,6 +95,7 @@ DEFAULT_GROUP = {
     "vip_mode": True,
     "auto_ad_enabled": False,
     "auto_ad_text": "📢 إعلان المجموعة",
+    "auto_ads": ["📢 إعلان المجموعة"],
     "auto_ad_hours": 3,
     "commands_intro_text": (
         "أوامر المجموعة\n\n"
@@ -172,6 +173,13 @@ def load_data() -> dict[str, Any]:
                         cat_cfg["commands"] = {}
             if not isinstance(merged.get("commands_intro_text"), str):
                 merged["commands_intro_text"] = DEFAULT_GROUP["commands_intro_text"]
+            if not isinstance(merged.get("auto_ads"), list):
+                old_ad_text = str(merged.get("auto_ad_text", "")).strip()
+                merged["auto_ads"] = [old_ad_text] if old_ad_text else []
+            else:
+                merged["auto_ads"] = [str(x).strip() for x in merged["auto_ads"] if str(x).strip()]
+            if merged["auto_ads"] and not str(merged.get("auto_ad_text", "")).strip():
+                merged["auto_ad_text"] = merged["auto_ads"][0]
             data["groups"][gid] = merged
         return data
     except Exception:
@@ -528,13 +536,45 @@ def vip_hub() -> InlineKeyboardMarkup:
 def ads_menu(gid: str) -> InlineKeyboardMarkup:
     cfg = DATA["groups"][gid]
     status = "مفعل ✅" if cfg.get("auto_ad_enabled") else "معطل ❌"
+    ads_count = len(cfg.get("auto_ads", [])) if isinstance(cfg.get("auto_ads"), list) else 0
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"تشغيل/إيقاف الإعلان: {status}", callback_data="toggle_auto_ad")],
-        [InlineKeyboardButton("📝 تغيير نص الإعلان", callback_data="set_auto_ad")],
-        [InlineKeyboardButton("⏱️ تغيير وقت الإعلان", callback_data="set_auto_ad_hours")],
-        [InlineKeyboardButton("👁️ عرض الإعلان الحالي", callback_data="show_auto_ad")],
-        [InlineKeyboardButton("🧪 إرسال تجربة الآن", callback_data="send_auto_ad_now")],
+        [InlineKeyboardButton(f"تشغيل/إيقاف الإعلانات: {status}", callback_data="toggle_auto_ad")],
+        [InlineKeyboardButton("➕ إضافة إعلان", callback_data="add_auto_ad")],
+        [InlineKeyboardButton(f"📋 إدارة الإعلانات ({ads_count})", callback_data="manage_auto_ads")],
+        [InlineKeyboardButton("👁️ عرض كل الإعلانات", callback_data="show_auto_ad")],
+        [InlineKeyboardButton("🧹 حذف كل الإعلانات", callback_data="clear_auto_ads")],
+        [InlineKeyboardButton("⏱️ تغيير وقت الإرسال", callback_data="set_auto_ad_hours")],
+        [InlineKeyboardButton(f"🧪 إرسال الكل الآن ({ads_count})", callback_data="send_auto_ad_now")],
         [InlineKeyboardButton("⬅️ العودة", callback_data="vip_hub")],
+    ])
+
+
+def auto_ads_list_menu(gid: str) -> InlineKeyboardMarkup:
+    cfg = DATA["groups"][gid]
+    ads = cfg.get("auto_ads", [])
+    if not isinstance(ads, list):
+        ads = []
+
+    rows = []
+    for i, ad in enumerate(ads, start=1):
+        preview = str(ad).strip().replace("\n", " ")
+        if len(preview) > 20:
+            preview = preview[:20] + "..."
+        rows.append([InlineKeyboardButton(f"📢 إعلان {i} - {preview}", callback_data=f"manage_auto_ad:{i}")])
+
+    rows.append([InlineKeyboardButton("➕ إضافة إعلان", callback_data="add_auto_ad")])
+    rows.append([InlineKeyboardButton("⬅️ العودة", callback_data="ads_menu")])
+    return InlineKeyboardMarkup(rows)
+
+
+def single_auto_ad_menu(index: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("👁️ عرض الإعلان", callback_data=f"view_auto_ad:{index}")],
+        [InlineKeyboardButton("✏️ تعديل الإعلان", callback_data=f"edit_auto_ad:{index}")],
+        [InlineKeyboardButton("🧪 إرسال هذا الإعلان", callback_data=f"send_one_auto_ad:{index}")],
+        [InlineKeyboardButton("🗑️ حذف هذا الإعلان", callback_data=f"delete_one_auto_ad:{index}")],
+        [InlineKeyboardButton("⬅️ رجوع للإعلانات", callback_data="manage_auto_ads")],
+        [InlineKeyboardButton("🏠 رجوع لقسم الإعلانات", callback_data="ads_menu")],
     ])
 
 
@@ -908,20 +948,27 @@ async def auto_ad_sender(context: ContextTypes.DEFAULT_TYPE):
             if not cfg.get("auto_ad_enabled"):
                 continue
 
-            text_msg = str(cfg.get("auto_ad_text", "")).strip()
-            if not text_msg:
+            ads = cfg.get("auto_ads")
+            if not isinstance(ads, list):
+                old_text = str(cfg.get("auto_ad_text", "")).strip()
+                ads = [old_text] if old_text else []
+
+            ads = [str(ad).strip() for ad in ads if str(ad).strip()]
+            if not ads:
                 continue
 
             try:
-                await context.bot.send_message(
-                    chat_id=int(gid),
-                    text=text_msg,
-                    disable_web_page_preview=True,
-                )
+                # يرسل كل الإعلانات المحفوظة بنفس وقت الجدولة، واحد وراء الثاني مباشرة
+                for ad_text in ads:
+                    await context.bot.send_message(
+                        chat_id=int(gid),
+                        text=ad_text,
+                        disable_web_page_preview=True,
+                    )
             except Exception as e:
-                print(f"Auto ad failed in {gid}: {e}")
+                print(f"Auto ads failed in {gid}: {e}")
     except Exception as e:
-        print(f"Auto ad global error: {e}")
+        print(f"Auto ads global error: {e}")
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1328,28 +1375,145 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cfg = DATA["groups"][gid]
 
     if data == "ads_menu":
+        ads_count = len(cfg.get("auto_ads", [])) if isinstance(cfg.get("auto_ads"), list) else 0
         await query.edit_message_text(
             "📢 قسم الإعلانات التلقائية\n\n"
             f"الحالة: {'مفعل ✅' if cfg.get('auto_ad_enabled') else 'معطل ❌'}\n"
-            f"الوقت: كل {cfg.get('auto_ad_hours', 3)} ساعات\n\n"
-            "اختر اللي تبي تعدله:",
+            f"الوقت: كل {cfg.get('auto_ad_hours', 3)} ساعات\n"
+            f"عدد الإعلانات: {ads_count}\n\n"
+            "ملاحظة: عند وقت الإرسال، البوت يرسل كل الإعلانات المحفوظة بنفس الوقت واحد وراء الثاني.",
             reply_markup=ads_menu(gid),
         )
+        return
+
+    if data == "manage_auto_ads":
+        ads = cfg.get("auto_ads", [])
+        if not isinstance(ads, list) or not ads:
+            await query.edit_message_text(
+                "📢 لا توجد إعلانات محفوظة حالياً.\n\nاضغط إضافة إعلان عشان تضيف أول إعلان.",
+                reply_markup=auto_ads_list_menu(gid),
+            )
+            return
+
+        await query.edit_message_text(
+            "📋 اختر الإعلان اللي تبي تتحكم فيه:",
+            reply_markup=auto_ads_list_menu(gid),
+        )
+        return
+
+    if data.startswith("manage_auto_ad:"):
+        try:
+            index = int(data.split(":", 1)[1])
+            ads = cfg.get("auto_ads", [])
+            if not isinstance(ads, list) or index < 1 or index > len(ads):
+                raise ValueError
+            preview = str(ads[index - 1]).strip()
+            if len(preview) > 500:
+                preview = preview[:500] + "..."
+            await query.edit_message_text(
+                f"📢 إدارة الإعلان رقم {index}\n\n{preview}",
+                reply_markup=single_auto_ad_menu(index),
+                disable_web_page_preview=True,
+            )
+        except Exception:
+            await query.edit_message_text("❌ الإعلان غير موجود.", reply_markup=auto_ads_list_menu(gid))
+        return
+
+    if data.startswith("view_auto_ad:"):
+        try:
+            index = int(data.split(":", 1)[1])
+            ads = cfg.get("auto_ads", [])
+            if not isinstance(ads, list) or index < 1 or index > len(ads):
+                raise ValueError
+            await query.edit_message_text(
+                f"📢 الإعلان رقم {index}:\n\n{ads[index - 1]}",
+                reply_markup=single_auto_ad_menu(index),
+                disable_web_page_preview=True,
+            )
+        except Exception:
+            await query.edit_message_text("❌ الإعلان غير موجود.", reply_markup=auto_ads_list_menu(gid))
+        return
+
+    if data.startswith("edit_auto_ad:"):
+        try:
+            index = int(data.split(":", 1)[1])
+            ads = cfg.get("auto_ads", [])
+            if not isinstance(ads, list) or index < 1 or index > len(ads):
+                raise ValueError
+            st["waiting"] = "edit_auto_ad"
+            st["edit_ad_index"] = index
+            await query.edit_message_text(
+                f"✏️ أرسل النص الجديد للإعلان رقم {index}.",
+                reply_markup=single_auto_ad_menu(index),
+            )
+        except Exception:
+            await query.edit_message_text("❌ الإعلان غير موجود.", reply_markup=auto_ads_list_menu(gid))
+        return
+
+    if data.startswith("send_one_auto_ad:"):
+        try:
+            index = int(data.split(":", 1)[1])
+            ads = cfg.get("auto_ads", [])
+            if not isinstance(ads, list) or index < 1 or index > len(ads):
+                raise ValueError
+            await context.bot.send_message(
+                chat_id=int(gid),
+                text=str(ads[index - 1]),
+                disable_web_page_preview=True,
+            )
+            await query.edit_message_text(
+                f"✅ تم إرسال الإعلان رقم {index} كتجربة داخل القروب.",
+                reply_markup=single_auto_ad_menu(index),
+            )
+        except Exception:
+            await query.edit_message_text(
+                "❌ تعذر إرسال الإعلان. تأكد أن البوت أدمن وله صلاحية إرسال رسائل.",
+                reply_markup=auto_ads_list_menu(gid),
+            )
+        return
+
+    if data.startswith("delete_one_auto_ad:"):
+        try:
+            index = int(data.split(":", 1)[1])
+            ads = cfg.get("auto_ads", [])
+            if not isinstance(ads, list) or index < 1 or index > len(ads):
+                raise ValueError
+            ads.pop(index - 1)
+            cfg["auto_ads"] = ads
+            cfg["auto_ad_text"] = ads[-1] if ads else ""
+            save_data()
+            await query.edit_message_text(
+                f"🗑️ تم حذف الإعلان رقم {index}.",
+                reply_markup=auto_ads_list_menu(gid),
+            )
+        except Exception:
+            await query.edit_message_text("❌ الإعلان غير موجود.", reply_markup=auto_ads_list_menu(gid))
         return
 
     if data == "toggle_auto_ad":
         cfg["auto_ad_enabled"] = not cfg.get("auto_ad_enabled", False)
         save_data()
         await query.edit_message_text(
-            "✅ تم تحديث حالة الإعلان التلقائي.",
+            "✅ تم تحديث حالة الإعلانات التلقائية.",
             reply_markup=ads_menu(gid),
         )
         return
 
     if data == "show_auto_ad":
+        ads = cfg.get("auto_ads", [])
+        if not isinstance(ads, list):
+            ads = []
+        ads = [str(ad).strip() for ad in ads if str(ad).strip()]
+        if not ads:
+            msg = "📢 لا توجد إعلانات محفوظة حالياً."
+        else:
+            parts = []
+            for i, ad in enumerate(ads, start=1):
+                parts.append(f"📢 إعلان {i}:\n{ad}")
+            msg = "\n\n━━━━━━━━━━━━\n\n".join(parts)
+
         await query.edit_message_text(
-            f"📢 الإعلان الحالي:\n\n{cfg.get('auto_ad_text', 'لا يوجد إعلان')}\n\n"
-            f"⏱️ الوقت: كل {cfg.get('auto_ad_hours', 3)} ساعات\n"
+            f"{msg}\n\n⏱️ الوقت: كل {cfg.get('auto_ad_hours', 3)} ساعات\n"
             f"الحالة: {'مفعل ✅' if cfg.get('auto_ad_enabled') else 'معطل ❌'}",
             reply_markup=ads_menu(gid),
             disable_web_page_preview=True,
@@ -1357,25 +1521,46 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "send_auto_ad_now":
-        text_msg = str(cfg.get("auto_ad_text", "")).strip()
-        if not text_msg:
-            await query.edit_message_text("❌ لا يوجد نص إعلان محفوظ.", reply_markup=ads_menu(gid))
+        ads = cfg.get("auto_ads", [])
+        if not isinstance(ads, list):
+            ads = []
+        ads = [str(ad).strip() for ad in ads if str(ad).strip()]
+        if not ads:
+            await query.edit_message_text("❌ لا توجد إعلانات محفوظة.", reply_markup=ads_menu(gid))
             return
         try:
-            await context.bot.send_message(chat_id=int(gid), text=text_msg, disable_web_page_preview=True)
-            await query.edit_message_text("✅ تم إرسال الإعلان كتجربة داخل القروب.", reply_markup=ads_menu(gid))
+            for ad_text in ads:
+                await context.bot.send_message(chat_id=int(gid), text=ad_text, disable_web_page_preview=True)
+            await query.edit_message_text(f"✅ تم إرسال {len(ads)} إعلان كتجربة داخل القروب.", reply_markup=ads_menu(gid))
         except Exception:
-            await query.edit_message_text("❌ تعذر إرسال الإعلان. تأكد أن البوت أدمن وله صلاحية إرسال رسائل.", reply_markup=ads_menu(gid))
+            await query.edit_message_text("❌ تعذر إرسال الإعلانات. تأكد أن البوت أدمن وله صلاحية إرسال رسائل.", reply_markup=ads_menu(gid))
+        return
+
+    if data == "add_auto_ad":
+        st["waiting"] = "add_auto_ad"
+        await query.edit_message_text("أرسل نص الإعلان الجديد الآن.\n\nسيتم إضافته مع باقي الإعلانات.", reply_markup=back("ads_menu"))
         return
 
     if data == "set_auto_ad":
-        st["waiting"] = "set_auto_ad"
-        await query.edit_message_text("أرسل نص الإعلان الجديد الآن.", reply_markup=back("ads_menu"))
+        st["waiting"] = "add_auto_ad"
+        await query.edit_message_text("أرسل نص الإعلان الجديد الآن.\n\nسيتم إضافته مع باقي الإعلانات.", reply_markup=back("ads_menu"))
+        return
+
+    if data == "delete_auto_ad":
+        st["waiting"] = "delete_auto_ad"
+        await query.edit_message_text("أرسل رقم الإعلان اللي تبي تحذفه.\nمثال: 1", reply_markup=back("ads_menu"))
+        return
+
+    if data == "clear_auto_ads":
+        cfg["auto_ads"] = []
+        cfg["auto_ad_text"] = ""
+        save_data()
+        await query.edit_message_text("🧹 تم حذف كل الإعلانات.", reply_markup=ads_menu(gid))
         return
 
     if data == "set_auto_ad_hours":
         st["waiting"] = "set_auto_ad_hours"
-        await query.edit_message_text("أرسل عدد الساعات بين كل إعلان. مثال: 3 أو 6", reply_markup=back("ads_menu"))
+        await query.edit_message_text("أرسل عدد الساعات بين كل إرسال. مثال: 3 أو 6\n\nكل الإعلانات ستُرسل مع بعض عند هذا الوقت.", reply_markup=back("ads_menu"))
         return
 
     if data == "toggle_media_position":
@@ -1686,11 +1871,49 @@ async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
     waiting = st.get("waiting")
     text = update.message.text.strip()
 
-    if waiting == "set_auto_ad":
+    if waiting == "edit_auto_ad":
+        try:
+            index = int(st.get("edit_ad_index", 0))
+            ads = cfg.get("auto_ads", [])
+            if not isinstance(ads, list) or index < 1 or index > len(ads):
+                raise ValueError
+            ads[index - 1] = text
+            cfg["auto_ads"] = ads
+            cfg["auto_ad_text"] = text
+            st["waiting"] = None
+            st["edit_ad_index"] = None
+            save_data()
+            await update.message.reply_text(f"✅ تم تعديل الإعلان رقم {index}.", reply_markup=main_menu(user.id))
+        except Exception:
+            await update.message.reply_text("❌ تعذر تعديل الإعلان. ارجع لقائمة الإعلانات وجرب مرة ثانية.")
+        return
+
+    if waiting in {"set_auto_ad", "add_auto_ad"}:
+        if not isinstance(cfg.get("auto_ads"), list):
+            cfg["auto_ads"] = []
+        cfg["auto_ads"].append(text)
         cfg["auto_ad_text"] = text
         st["waiting"] = None
         save_data()
-        await update.message.reply_text("✅ تم حفظ نص الإعلان.", reply_markup=main_menu(user.id))
+        await update.message.reply_text(f"✅ تم إضافة الإعلان رقم {len(cfg['auto_ads'])}.", reply_markup=main_menu(user.id))
+        return
+
+    if waiting == "delete_auto_ad":
+        try:
+            idx = int(normalize_digits(text)) - 1
+            ads = cfg.get("auto_ads", [])
+            if not isinstance(ads, list):
+                ads = []
+            if idx < 0 or idx >= len(ads):
+                raise ValueError
+            ads.pop(idx)
+            cfg["auto_ads"] = ads
+            cfg["auto_ad_text"] = ads[-1] if ads else ""
+            st["waiting"] = None
+            save_data()
+            await update.message.reply_text("✅ تم حذف الإعلان.", reply_markup=main_menu(user.id))
+        except Exception:
+            await update.message.reply_text("❌ أرسل رقم إعلان صحيح. مثال: 1")
         return
 
     if waiting == "set_auto_ad_hours":
