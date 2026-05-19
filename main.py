@@ -516,11 +516,25 @@ def vip_hub() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🤖 الردود", callback_data="replies_menu"),
          InlineKeyboardButton("🛡️ الحماية", callback_data="protect_menu")],
+        [InlineKeyboardButton("📢 الإعلانات", callback_data="ads_menu"),
+         InlineKeyboardButton("📌 التثبيت", callback_data="pin_menu")],
         [InlineKeyboardButton("🛠️ أوامر المشرفين", callback_data="admins_menu"),
          InlineKeyboardButton("💾 النسخ الاحتياطي", callback_data="backup_menu")],
-        [InlineKeyboardButton("🧾 أوامر المجموعة", callback_data="commands_menu"),
-         InlineKeyboardButton("📌 التثبيت", callback_data="pin_menu")],
+        [InlineKeyboardButton("🧾 أوامر المجموعة", callback_data="commands_menu")],
         [InlineKeyboardButton("⬅️ العودة", callback_data="main")],
+    ])
+
+
+def ads_menu(gid: str) -> InlineKeyboardMarkup:
+    cfg = DATA["groups"][gid]
+    status = "مفعل ✅" if cfg.get("auto_ad_enabled") else "معطل ❌"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"تشغيل/إيقاف الإعلان: {status}", callback_data="toggle_auto_ad")],
+        [InlineKeyboardButton("📝 تغيير نص الإعلان", callback_data="set_auto_ad")],
+        [InlineKeyboardButton("⏱️ تغيير وقت الإعلان", callback_data="set_auto_ad_hours")],
+        [InlineKeyboardButton("👁️ عرض الإعلان الحالي", callback_data="show_auto_ad")],
+        [InlineKeyboardButton("🧪 إرسال تجربة الآن", callback_data="send_auto_ad_now")],
+        [InlineKeyboardButton("⬅️ العودة", callback_data="vip_hub")],
     ])
 
 
@@ -1313,6 +1327,57 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     cfg = DATA["groups"][gid]
 
+    if data == "ads_menu":
+        await query.edit_message_text(
+            "📢 قسم الإعلانات التلقائية\n\n"
+            f"الحالة: {'مفعل ✅' if cfg.get('auto_ad_enabled') else 'معطل ❌'}\n"
+            f"الوقت: كل {cfg.get('auto_ad_hours', 3)} ساعات\n\n"
+            "اختر اللي تبي تعدله:",
+            reply_markup=ads_menu(gid),
+        )
+        return
+
+    if data == "toggle_auto_ad":
+        cfg["auto_ad_enabled"] = not cfg.get("auto_ad_enabled", False)
+        save_data()
+        await query.edit_message_text(
+            "✅ تم تحديث حالة الإعلان التلقائي.",
+            reply_markup=ads_menu(gid),
+        )
+        return
+
+    if data == "show_auto_ad":
+        await query.edit_message_text(
+            f"📢 الإعلان الحالي:\n\n{cfg.get('auto_ad_text', 'لا يوجد إعلان')}\n\n"
+            f"⏱️ الوقت: كل {cfg.get('auto_ad_hours', 3)} ساعات\n"
+            f"الحالة: {'مفعل ✅' if cfg.get('auto_ad_enabled') else 'معطل ❌'}",
+            reply_markup=ads_menu(gid),
+            disable_web_page_preview=True,
+        )
+        return
+
+    if data == "send_auto_ad_now":
+        text_msg = str(cfg.get("auto_ad_text", "")).strip()
+        if not text_msg:
+            await query.edit_message_text("❌ لا يوجد نص إعلان محفوظ.", reply_markup=ads_menu(gid))
+            return
+        try:
+            await context.bot.send_message(chat_id=int(gid), text=text_msg, disable_web_page_preview=True)
+            await query.edit_message_text("✅ تم إرسال الإعلان كتجربة داخل القروب.", reply_markup=ads_menu(gid))
+        except Exception:
+            await query.edit_message_text("❌ تعذر إرسال الإعلان. تأكد أن البوت أدمن وله صلاحية إرسال رسائل.", reply_markup=ads_menu(gid))
+        return
+
+    if data == "set_auto_ad":
+        st["waiting"] = "set_auto_ad"
+        await query.edit_message_text("أرسل نص الإعلان الجديد الآن.", reply_markup=back("ads_menu"))
+        return
+
+    if data == "set_auto_ad_hours":
+        st["waiting"] = "set_auto_ad_hours"
+        await query.edit_message_text("أرسل عدد الساعات بين كل إعلان. مثال: 3 أو 6", reply_markup=back("ads_menu"))
+        return
+
     if data == "toggle_media_position":
         cfg["media_below_text"] = not cfg.get("media_below_text", True)
         save_data()
@@ -1620,6 +1685,26 @@ async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cfg = DATA["groups"][gid]
     waiting = st.get("waiting")
     text = update.message.text.strip()
+
+    if waiting == "set_auto_ad":
+        cfg["auto_ad_text"] = text
+        st["waiting"] = None
+        save_data()
+        await update.message.reply_text("✅ تم حفظ نص الإعلان.", reply_markup=main_menu(user.id))
+        return
+
+    if waiting == "set_auto_ad_hours":
+        try:
+            hours = int(normalize_digits(text))
+            if hours < 1:
+                raise ValueError
+            cfg["auto_ad_hours"] = hours
+            st["waiting"] = None
+            save_data()
+            await update.message.reply_text(f"✅ تم ضبط الإعلان كل {hours} ساعات.", reply_markup=main_menu(user.id))
+        except Exception:
+            await update.message.reply_text("❌ أرسل رقم صحيح فقط. مثال: 3")
+        return
 
     if waiting == "set_welcome":
         cfg["welcome_text"] = text
