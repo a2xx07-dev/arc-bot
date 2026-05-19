@@ -93,6 +93,9 @@ DEFAULT_GROUP = {
     "mute_after": 3,
     "ban_after": 5,
     "vip_mode": True,
+    "auto_ad_enabled": False,
+    "auto_ad_text": "📢 إعلان المجموعة",
+    "auto_ad_hours": 3,
     "commands_intro_text": (
         "أوامر المجموعة\n\n"
         "📌 أوامر سكوربين\nكل ما يخص سكوربين العادي والبرو\n\n"
@@ -882,6 +885,29 @@ async def warn_user(update: Update, context: ContextTypes.DEFAULT_TYPE, reason: 
     await update.effective_chat.send_message(
         f"⚠️ {update.effective_user.first_name} أخذ تحذير رقم {count}\nالسبب: {reason}\n{punishment}"
     )
+
+
+
+async def auto_ad_sender(context: ContextTypes.DEFAULT_TYPE):
+    try:
+        for gid, cfg in DATA.get("groups", {}).items():
+            if not cfg.get("auto_ad_enabled"):
+                continue
+
+            text_msg = str(cfg.get("auto_ad_text", "")).strip()
+            if not text_msg:
+                continue
+
+            try:
+                await context.bot.send_message(
+                    chat_id=int(gid),
+                    text=text_msg,
+                    disable_web_page_preview=True,
+                )
+            except Exception as e:
+                print(f"Auto ad failed in {gid}: {e}")
+    except Exception as e:
+        print(f"Auto ad global error: {e}")
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
