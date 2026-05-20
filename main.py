@@ -1052,12 +1052,15 @@ def get_auto_ads_interval_seconds(cfg: dict[str, Any]) -> int:
 def format_auto_ad_interval(value: Any) -> str:
     raw = str(value).strip().lower()
     raw = normalize_digits(raw)
+
     if raw.endswith("m"):
         n = raw[:-1] or "1"
         return f"كل {n} دقيقة"
+
     if raw.endswith("h"):
         n = raw[:-1] or "1"
         return f"كل {n} ساعة"
+
     return f"كل {raw} ساعة"
 
 
@@ -1734,7 +1737,7 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "set_auto_ad_hours":
         st["waiting"] = "set_auto_ad_hours"
-        await query.edit_message_text("أرسل الوقت بين كل إرسال.\n\nأمثلة:\n1m = دقيقة\n3m = 3 دقائق\n10m = 10 دقائق\n1h = ساعة\n3h = 3 ساعات\n\nكل الإعلانات ستُرسل مع بعض عند هذا الوقت.", reply_markup=back("ads_menu"))
+        await query.edit_message_text("أرسل الوقت بين كل إرسال.\n\nأمثلة:\n1m = دقيقة\n3m = 3 دقائق\n10m = 10 دقائق\n1h = ساعة\n3h = 3 ساعات\n\nكل الإعلانات ستُرسل مع بعض عند هذا الوقت.\n\nأمثلة:\n1m = دقيقة\n3m = 3 دقائق\n1h = ساعة\n3 = 3 ساعات", reply_markup=back("ads_menu"))
         return
 
     if data == "toggle_media_position":
@@ -2125,10 +2128,12 @@ async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 number = int(value[:-1])
                 if number < 1:
                     raise ValueError
+
             elif value.endswith("h"):
                 number = int(value[:-1])
                 if number < 1:
                     raise ValueError
+
             else:
                 number = int(value)
                 if number < 1:
@@ -2137,7 +2142,10 @@ async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cfg["auto_ad_hours"] = value
             st["waiting"] = None
             save_data()
+
+            # يعيد تشغيل المؤقت فوراً بعد تغيير الوقت
             restart_auto_ads_job(context, gid, cfg, first_seconds=60)
+
             await update.message.reply_text(
                 f"✅ تم ضبط الإعلانات: {format_auto_ad_interval(value)}.\n\n"
                 "إذا الإعلانات مفعلة، سيبدأ الإرسال بعد دقيقة ثم يتكرر حسب الوقت الذي حددته.",
