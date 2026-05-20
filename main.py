@@ -1015,14 +1015,50 @@ async def auto_ad_sender(context: ContextTypes.DEFAULT_TYPE):
 
 
 def get_auto_ads_interval_seconds(cfg: dict[str, Any]) -> int:
-    """يرجع وقت الإرسال بالثواني حسب الرقم اللي تحدده من اللوحة."""
+    """
+    يدعم:
+    1m = دقيقة
+    3m = 3 دقائق
+    10m = 10 دقائق
+    1h = ساعة
+    3h = 3 ساعات
+    رقم فقط = ساعات
+    """
+    raw = str(cfg.get("auto_ad_hours", "3")).strip().lower()
+    raw = normalize_digits(raw)
+
     try:
-        hours = int(cfg.get("auto_ad_hours", 3))
+        if raw.endswith("m"):
+            minutes = int(raw[:-1])
+            if minutes < 1:
+                minutes = 1
+            return minutes * 60
+
+        if raw.endswith("h"):
+            hours = int(raw[:-1])
+            if hours < 1:
+                hours = 1
+            return hours * 3600
+
+        hours = int(raw)
+        if hours < 1:
+            hours = 1
+        return hours * 3600
+
     except Exception:
-        hours = 3
-    if hours < 1:
-        hours = 1
-    return hours * 3600
+        return 3 * 3600
+
+
+def format_auto_ad_interval(value: Any) -> str:
+    raw = str(value).strip().lower()
+    raw = normalize_digits(raw)
+    if raw.endswith("m"):
+        n = raw[:-1] or "1"
+        return f"كل {n} دقيقة"
+    if raw.endswith("h"):
+        n = raw[:-1] or "1"
+        return f"كل {n} ساعة"
+    return f"كل {raw} ساعة"
 
 
 def has_auto_ads(cfg: dict[str, Any]) -> bool:
@@ -1055,7 +1091,7 @@ def start_auto_ads_job_for_group(job_queue, gid: str, cfg: dict[str, Any], first
         first=first_seconds,
         name=f"auto_ads_{gid}",
     )
-    print(f"✅ Auto ads job started for {gid}: every {interval_seconds // 3600} hour(s)")
+    print(f"✅ Auto ads job started for {gid}: every {interval_seconds} seconds")
 
 
 def restart_auto_ads_job(context: ContextTypes.DEFAULT_TYPE, gid: str, cfg: dict[str, Any], first_seconds: int = 60) -> None:
@@ -1514,7 +1550,7 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(
             "📢 قسم الإعلانات التلقائية\n\n"
             f"الحالة: {'مفعل ✅' if cfg.get('auto_ad_enabled') else 'معطل ❌'}\n"
-            f"الوقت: كل {cfg.get('auto_ad_hours', 3)} ساعات\n"
+            f"الوقت: {format_auto_ad_interval(cfg.get('auto_ad_hours', 3))}\n"
             f"عدد الإعلانات: {ads_count}\n\n"
             "ملاحظة: عند وقت الإرسال، البوت يرسل كل الإعلانات المحفوظة بنفس الوقت واحد وراء الثاني.",
             reply_markup=ads_menu(gid),
@@ -1698,7 +1734,7 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "set_auto_ad_hours":
         st["waiting"] = "set_auto_ad_hours"
-        await query.edit_message_text("أرسل عدد الساعات بين كل إرسال. مثال: 1 أو 2 أو 3 أو 24\n\nكل الإعلانات ستُرسل مع بعض عند هذا الوقت.", reply_markup=back("ads_menu"))
+        await query.edit_message_text("أرسل الوقت بين كل إرسال.\n\nأمثلة:\n1m = دقيقة\n3m = 3 دقائق\n10m = 10 دقائق\n1h = ساعة\n3h = 3 ساعات\n\nكل الإعلانات ستُرسل مع بعض عند هذا الوقت.", reply_markup=back("ads_menu"))
         return
 
     if data == "toggle_media_position":
@@ -2081,20 +2117,43 @@ async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if waiting == "set_auto_ad_hours":
         try:
-            hours = int(normalize_digits(text))
-            if hours < 1:
+            value = normalize_digits(text.strip().lower())
+            if not value:
                 raise ValueError
-            cfg["auto_ad_hours"] = hours
+
+            if value.endswith("m"):
+                number = int(value[:-1])
+                if number < 1:
+                    raise ValueError
+            elif value.endswith("h"):
+                number = int(value[:-1])
+                if number < 1:
+                    raise ValueError
+            else:
+                number = int(value)
+                if number < 1:
+                    raise ValueError
+
+            cfg["auto_ad_hours"] = value
             st["waiting"] = None
             save_data()
             restart_auto_ads_job(context, gid, cfg, first_seconds=60)
             await update.message.reply_text(
-                f"✅ تم ضبط الإعلانات كل {hours} ساعة.\n\n"
+                f"✅ تم ضبط الإعلانات: {format_auto_ad_interval(value)}.\n\n"
                 "إذا الإعلانات مفعلة، سيبدأ الإرسال بعد دقيقة ثم يتكرر حسب الوقت الذي حددته.",
                 reply_markup=main_menu(user.id),
             )
         except Exception:
-            await update.message.reply_text("❌ أرسل رقم صحيح فقط. مثال: 1 أو 2 أو 3 أو 24")
+            await update.message.reply_text(
+                "❌ أرسل وقت صحيح فقط.\n\n"
+                "أمثلة:\n"
+                "1m = دقيقة\n"
+                "3m = 3 دقائق\n"
+                "10m = 10 دقائق\n"
+                "1h = ساعة\n"
+                "3h = 3 ساعات\n"
+                "أو اكتب رقم فقط مثل 3 ويعتبر ساعات."
+            )
         return
 
     if waiting == "set_welcome":
