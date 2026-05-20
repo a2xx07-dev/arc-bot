@@ -1013,6 +1013,66 @@ async def auto_ad_sender(context: ContextTypes.DEFAULT_TYPE):
         print(f"Auto ads global error: {e}")
 
 
+
+def get_auto_ads_interval_seconds(cfg: dict[str, Any]) -> int:
+    """يرجع وقت الإرسال بالثواني حسب الرقم اللي تحدده من اللوحة."""
+    try:
+        hours = int(cfg.get("auto_ad_hours", 3))
+    except Exception:
+        hours = 3
+    if hours < 1:
+        hours = 1
+    return hours * 3600
+
+
+def has_auto_ads(cfg: dict[str, Any]) -> bool:
+    ads = cfg.get("auto_ads", [])
+    if not isinstance(ads, list):
+        old_text = str(cfg.get("auto_ad_text", "")).strip()
+        ads = [old_text] if old_text else []
+    return bool([str(ad).strip() for ad in ads if str(ad).strip()])
+
+
+def start_auto_ads_job_for_group(job_queue, gid: str, cfg: dict[str, Any], first_seconds: int = 60) -> None:
+    """يشغل مؤقت الإعلانات لقروب واحد حسب الوقت المحفوظ."""
+    if job_queue is None:
+        print("JobQueue غير متوفر. تأكد من requirements.txt")
+        return
+
+    for job in job_queue.get_jobs_by_name(f"auto_ads_{gid}"):
+        job.schedule_removal()
+
+    if not cfg.get("auto_ad_enabled"):
+        return
+
+    if not has_auto_ads(cfg):
+        return
+
+    interval_seconds = get_auto_ads_interval_seconds(cfg)
+    job_queue.run_repeating(
+        auto_ad_sender,
+        interval=interval_seconds,
+        first=first_seconds,
+        name=f"auto_ads_{gid}",
+    )
+    print(f"✅ Auto ads job started for {gid}: every {interval_seconds // 3600} hour(s)")
+
+
+def restart_auto_ads_job(context: ContextTypes.DEFAULT_TYPE, gid: str, cfg: dict[str, Any], first_seconds: int = 60) -> None:
+    """يعيد تشغيل مؤقت الإعلانات بعد تغيير الوقت أو التشغيل أو إضافة إعلان."""
+    start_auto_ads_job_for_group(context.job_queue, gid, cfg, first_seconds=first_seconds)
+
+
+async def post_init(application) -> None:
+    """يشتغل تلقائياً بعد تشغيل البوت في Railway ويرجع مؤقتات الإعلانات."""
+    for gid, cfg in DATA.get("groups", {}).items():
+        try:
+            start_auto_ads_job_for_group(application.job_queue, gid, cfg, first_seconds=60)
+        except Exception as e:
+            print(f"Failed to restore auto ads job for {gid}: {e}")
+
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != ChatType.PRIVATE:
         await update.message.reply_text("⚠️ استخدم البوت في الخاص فقط\n\n@ArcZone_SaudiBot")
@@ -1557,6 +1617,7 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cfg["auto_ads"] = ads
             cfg["auto_ad_text"] = ads[-1] if ads else ""
             save_data()
+            restart_auto_ads_job(context, gid, cfg, first_seconds=60)
             await query.edit_message_text(
                 f"🗑️ تم حذف الإعلان رقم {index}.",
                 reply_markup=auto_ads_list_menu(gid),
@@ -1568,8 +1629,9 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "toggle_auto_ad":
         cfg["auto_ad_enabled"] = not cfg.get("auto_ad_enabled", False)
         save_data()
+        restart_auto_ads_job(context, gid, cfg, first_seconds=60)
         await query.edit_message_text(
-            "✅ تم تحديث حالة الإعلانات التلقائية.",
+            "✅ تم تحديث حالة الإعلانات التلقائية.\n\nإذا كانت مفعلة، سيبدأ الإرسال تلقائياً بعد دقيقة ثم حسب الوقت المحدد.",
             reply_markup=ads_menu(gid),
         )
         return
@@ -1630,12 +1692,13 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cfg["auto_ads"] = []
         cfg["auto_ad_text"] = ""
         save_data()
+        restart_auto_ads_job(context, gid, cfg, first_seconds=60)
         await query.edit_message_text("🧹 تم حذف كل الإعلانات.", reply_markup=ads_menu(gid))
         return
 
     if data == "set_auto_ad_hours":
         st["waiting"] = "set_auto_ad_hours"
-        await query.edit_message_text("أرسل عدد الساعات بين كل إرسال. مثال: 3 أو 6\n\nكل الإعلانات ستُرسل مع بعض عند هذا الوقت.", reply_markup=back("ads_menu"))
+        await query.edit_message_text("أرسل عدد الساعات بين كل إرسال. مثال: 1 أو 2 أو 3 أو 24\n\nكل الإعلانات ستُرسل مع بعض عند هذا الوقت.", reply_markup=back("ads_menu"))
         return
 
     if data == "toggle_media_position":
@@ -1981,6 +2044,7 @@ async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
             st["waiting"] = None
             st["edit_ad_index"] = None
             save_data()
+            restart_auto_ads_job(context, gid, cfg, first_seconds=60)
             await update.message.reply_text(f"✅ تم تعديل الإعلان رقم {index}.", reply_markup=main_menu(user.id))
         except Exception:
             await update.message.reply_text("❌ تعذر تعديل الإعلان. ارجع لقائمة الإعلانات وجرب مرة ثانية.")
@@ -1993,6 +2057,7 @@ async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cfg["auto_ad_text"] = text
         st["waiting"] = None
         save_data()
+        restart_auto_ads_job(context, gid, cfg, first_seconds=60)
         await update.message.reply_text(f"✅ تم إضافة الإعلان رقم {len(cfg['auto_ads'])}.", reply_markup=main_menu(user.id))
         return
 
@@ -2022,9 +2087,14 @@ async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cfg["auto_ad_hours"] = hours
             st["waiting"] = None
             save_data()
-            await update.message.reply_text(f"✅ تم ضبط الإعلان كل {hours} ساعات.", reply_markup=main_menu(user.id))
+            restart_auto_ads_job(context, gid, cfg, first_seconds=60)
+            await update.message.reply_text(
+                f"✅ تم ضبط الإعلانات كل {hours} ساعة.\n\n"
+                "إذا الإعلانات مفعلة، سيبدأ الإرسال بعد دقيقة ثم يتكرر حسب الوقت الذي حددته.",
+                reply_markup=main_menu(user.id),
+            )
         except Exception:
-            await update.message.reply_text("❌ أرسل رقم صحيح فقط. مثال: 3")
+            await update.message.reply_text("❌ أرسل رقم صحيح فقط. مثال: 1 أو 2 أو 3 أو 24")
         return
 
     if waiting == "set_welcome":
@@ -2407,7 +2477,7 @@ def main():
     if not TOKEN:
         raise ValueError("TOKEN غير موجود. حطه في Variables باسم TOKEN")
 
-    app = ApplicationBuilder().token(TOKEN).build()
+    app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("id", cmd_id))
